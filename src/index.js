@@ -63,6 +63,15 @@ initClient(botToken);
 // Ensure directories exist
 [LOGS_DIR, MEDIA_DIR, TYPING_DIR].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
 
+// Matches an explicit @mention of the bot, tolerating Slack's optional
+// `<@U123|displayname>` piped form. Used by BOTH the message and app_mention
+// handlers so their detection can never drift apart — divergence would silently
+// break the shared-dedup exactly-once guarantee.
+function isExplicitMention(text, botId) {
+  if (!botId || !text) return false;
+  return new RegExp(`<@${botId}(\\|[^>]+)?>`).test(text);
+}
+
 // ── Main ──
 
 async function main() {
@@ -81,8 +90,10 @@ async function main() {
 
   // ── Event: Direct Message ──
   app.event('message', async ({ event, say }) => {
-    // Ignore bot's own messages, subtypes (edits, joins, etc.)
-    if (event.bot_id || event.subtype) return;
+    // Ignore bot's own messages and noisy subtypes (edits, joins, etc.).
+    // IMPORTANT: file uploads arrive with subtype === 'file_share' — must let them through.
+    if (event.bot_id) return;
+    if (event.subtype && event.subtype !== 'file_share') return;
     if (event.user === getBotUserId()) return;
 
     // Dedup
@@ -95,7 +106,23 @@ async function main() {
     if (channelType === 'im') {
       await handleDM(event);
     } else {
-      await handleGroupMessage(event);
+      // Detect @mentions from the always-delivered `message` event instead of relying
+      // solely on the `app_mention` event. app_mention can silently stop being delivered
+      // after a socket reconnect; deferring to it would then drop every mention here.
+      // The app_mention handler dedups on the same `mention-` key; each handler sets that
+      // key synchronously before its first await, so whichever runs first wins and the
+      // other no-ops — exactly once, no double-dispatch / ghost [SKIP]. Keep the
+      // dedupMap.set above any await.
+      const isMention = isExplicitMention(event.text, getBotUserId());
+      if (isMention) {
+        const mentionKey = `mention-${event.channel}-${event.ts}`;
+        if (dedupMap.has(mentionKey)) return;
+        dedupMap.set(mentionKey, Date.now());
+        console.log(`[slack] @mention via message event (ts=${event.ts})`);
+        await handleGroupMessage(event, true);
+      } else {
+        await handleGroupMessage(event, false);
+      }
     }
   });
 
@@ -103,10 +130,15 @@ async function main() {
   app.event('app_mention', async ({ event }) => {
     if (event.bot_id || event.user === getBotUserId()) return;
 
+    // Slack fires app_mention for thread replies where the bot was previously mentioned,
+    // even without a new explicit @mention. Only process true @mentions.
+    if (!isExplicitMention(event.text, getBotUserId())) return;
+
     const msgKey = `mention-${event.channel}-${event.ts}`;
     if (dedupMap.has(msgKey)) return;
     dedupMap.set(msgKey, Date.now());
 
+    console.log(`[slack] app_mention event fired (ts=${event.ts})`);
     await handleGroupMessage(event, true);
   });
 
@@ -223,7 +255,10 @@ async function handleDM(event) {
   logMessage(event.channel, { from: userName, userId, text: content, ts: event.ts });
 
   // Format for C4
-  const fullContent = `<current-message>\n${threadContext}${content}\n</current-message>${fileLine}`;
+  const attachmentBlock = fileLine
+    ? `\n\n<attachments>\nUser attached file(s). Use the Read tool on each absolute path below to view the contents:${fileLine}\n</attachments>`
+    : '';
+  const fullContent = `<current-message>\n${threadContext}${content}\n</current-message>${attachmentBlock}`;
   const c4Message = `[Slack DM] ${userName} said: ${fullContent}`;
 
   // Send to C4
@@ -316,13 +351,19 @@ async function handleGroupMessage(event, isMention = false) {
   // Log
   logMessage(channelId, { from: userName, userId, text: content, ts: event.ts });
 
-  // Smart mode hint
+  // Response directive: a direct @mention is mandatory to answer; a smart-mode
+  // non-mention is optional — the agent reads it and decides whether it can help.
   let smartHint = '';
-  if (isSmartNoMention) {
-    smartHint = '\n(Smart mode: no @mention. Reply with [SKIP] if not relevant.)';
+  if (isMention) {
+    smartHint = '\n(You were directly @mentioned — you MUST reply. Do not respond with [SKIP].)';
+  } else if (isSmartNoMention) {
+    smartHint = '\n(No @mention. Read the message and decide: reply only if you can genuinely help, otherwise reply with exactly [SKIP].)';
   }
 
-  const fullContent = `<current-message>\n${groupContext}${content}\n</current-message>${fileLine}`;
+  const attachmentBlock = fileLine
+    ? `\n\n<attachments>\nUser attached file(s). Use the Read tool on each absolute path below to view the contents:${fileLine}\n</attachments>`
+    : '';
+  const fullContent = `<current-message>\n${groupContext}${content}\n</current-message>${attachmentBlock}`;
   const c4Message = `[Slack GROUP:${groupName}] ${userName} said: ${fullContent}${smartHint}`;
 
   sendToC4('slack', endpoint, c4Message, (rejectMsg) => {
