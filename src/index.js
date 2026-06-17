@@ -204,7 +204,7 @@ async function handleReviewFindingAction({ ack, body, respond }) {
 
   try {
     const result = await runReviewFindingWorkflowAction(body);
-    await postReviewFindingActionThreadReply(body, result.slackResponse || {
+    await postReviewFindingActionThreadReply(body, result.slackThreadReply || result.slackResponse || {
       response_type: 'ephemeral',
       text: `Recorded ${action.action_id.replace('review_finding_', '')} for the review finding.`,
     }, sendText);

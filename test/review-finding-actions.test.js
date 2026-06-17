@@ -59,6 +59,27 @@ test('postReviewFindingActionThreadReply appends success text in the card thread
   assert.deepEqual(result, { ok: true, ts: '1780000001.000200' });
 });
 
+test('postReviewFindingActionThreadReply accepts workflow slackThreadReply results', async () => {
+  const calls = [];
+  await postReviewFindingActionThreadReply({
+    channel: { id: 'C123' },
+    message: { ts: '1780000000.000100' },
+  }, {
+    text: 'Recorded rejected on the GitHub issue.',
+    policy: 'append-thread-reply-preserve-card',
+    sent: false,
+  }, async (...args) => {
+    calls.push(args);
+    return { ok: true };
+  });
+
+  assert.deepEqual(calls, [[
+    'C123',
+    'Recorded rejected on the GitHub issue.',
+    { thread_ts: '1780000000.000100' },
+  ]]);
+});
+
 test('reviewFindingActionThreadTarget handles attachment containers', () => {
   assert.deepEqual(reviewFindingActionThreadTarget({
     container: {
