@@ -3,7 +3,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { App } from '@slack/bolt';
 
 dotenv.config({ path: path.join(process.env.HOME, 'zylos/.env') });
@@ -12,8 +12,15 @@ import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './li
 import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
-  fetchHistory, fetchThread,
+  fetchHistory, fetchThread, sendText,
 } from './lib/message.js';
+import {
+  REVIEW_FINDING_ACTION_IDS,
+  canUseReviewFindingAction,
+  postReviewFindingActionThreadReply,
+  respondToAction,
+  resolveReviewFindingWorkflowBin,
+} from './lib/review-finding-actions.js';
 
 // ── Constants ──
 
@@ -22,6 +29,10 @@ const C4_RECEIVE = path.join(process.env.HOME,
 const LOGS_DIR = path.join(DATA_DIR, 'logs');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const TYPING_DIR = path.join(DATA_DIR, 'typing');
+const REVIEW_FINDING_ACTION_DIR = path.join(DATA_DIR, 'review-finding-actions');
+const REVIEW_FINDING_WORKFLOW_BIN = resolveReviewFindingWorkflowBin();
+const REVIEW_FINDING_WORKFLOW_COMMAND = process.env.REVIEW_FINDING_WORKFLOW_COMMAND
+  || 'computelabs-agent-workflow';
 
 const DEDUP_TTL = 5 * 60 * 1000; // 5 minutes
 const dedupMap = new Map();
@@ -61,7 +72,7 @@ if (config.connection_mode === 'socket' && !appToken) {
 initClient(botToken);
 
 // Ensure directories exist
-[LOGS_DIR, MEDIA_DIR, TYPING_DIR].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+[LOGS_DIR, MEDIA_DIR, TYPING_DIR, REVIEW_FINDING_ACTION_DIR].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
 
 // Matches an explicit @mention of the bot, tolerating Slack's optional
 // `<@U123|displayname>` piped form. Used by BOTH the message and app_mention
@@ -87,6 +98,10 @@ async function main() {
   };
 
   app = new App(appOpts);
+
+  for (const actionId of REVIEW_FINDING_ACTION_IDS) {
+    app.action(actionId, handleReviewFindingAction);
+  }
 
   // ── Event: Direct Message ──
   app.event('message', async ({ event, say }) => {
@@ -166,6 +181,82 @@ async function main() {
 
   // Typing indicator check (every 2s)
   setInterval(checkTypingDone, 2000);
+}
+
+// ── Review Finding Button Handler ──
+
+async function handleReviewFindingAction({ ack, body, respond }) {
+  await ack();
+
+  const action = body?.actions?.find(item => REVIEW_FINDING_ACTION_IDS.has(item.action_id));
+  if (!action) return;
+
+  const actorId = body?.user?.id || '';
+  const channelId = body?.channel?.id || body?.container?.channel_id || '';
+  if (!canUseReviewFindingAction(actorId, channelId, config)) {
+    console.warn(`[slack] Review finding action rejected for ${actorId || 'unknown'} in ${channelId || 'unknown-channel'}`);
+    await respondToAction(respond, {
+      response_type: 'ephemeral',
+      text: 'You are not configured to approve or reject auto-review findings from this Slack card.',
+    });
+    return;
+  }
+
+  try {
+    const result = await runReviewFindingWorkflowAction(body);
+    await postReviewFindingActionThreadReply(body, result.slackResponse || {
+      response_type: 'ephemeral',
+      text: `Recorded ${action.action_id.replace('review_finding_', '')} for the review finding.`,
+    }, sendText);
+  } catch (err) {
+    console.error('[slack] Review finding action failed:', err.message);
+    if (err.stderr) console.error(err.stderr);
+    await respondToAction(respond, {
+      response_type: 'ephemeral',
+      text: `Review finding action failed: ${err.message}`,
+    });
+  }
+}
+
+async function runReviewFindingWorkflowAction(payload) {
+  const payloadFile = path.join(
+    REVIEW_FINDING_ACTION_DIR,
+    `${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+  );
+  fs.writeFileSync(payloadFile, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+
+  const args = [
+    REVIEW_FINDING_WORKFLOW_COMMAND,
+    'handle-review-finding-action',
+    '--agent',
+    'cl-zylos-auto-reviewer',
+    '--payload-file',
+    payloadFile,
+  ];
+
+  const stdout = await execFileAsync(REVIEW_FINDING_WORKFLOW_BIN, args, {
+    encoding: 'utf8',
+    timeout: 120_000,
+  });
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(`review finding workflow returned invalid JSON: ${err.message}`);
+  }
+}
+
+function execFileAsync(file, args, options) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout;
+        error.stderr = stderr;
+        reject(error);
+        return;
+      }
+      resolve(stdout);
+    });
+  });
 }
 
 // ── DM Handler ──
