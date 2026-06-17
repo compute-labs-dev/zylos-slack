@@ -1,0 +1,83 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  canUseReviewFindingAction,
+  postReviewFindingActionThreadReply,
+  respondToAction,
+  resolveReviewFindingWorkflowBin,
+  reviewFindingActionThreadTarget,
+} from '../src/lib/review-finding-actions.js';
+
+test('review finding action permissions allow owner and channel allowlist only', () => {
+  const config = {
+    owner: { user_id: 'UOWNER' },
+    groups: {
+      C123: { allowFrom: ['UALLOWED'] },
+    },
+  };
+
+  assert.equal(canUseReviewFindingAction('UOWNER', 'C999', config), true);
+  assert.equal(canUseReviewFindingAction('UALLOWED', 'C123', config), true);
+  assert.equal(canUseReviewFindingAction('UALLOWED', 'C999', config), false);
+  assert.equal(canUseReviewFindingAction('', 'C123', config), false);
+});
+
+test('respondToAction never replaces the original Slack card', async () => {
+  let payload = null;
+  await respondToAction(async (value) => {
+    payload = value;
+  }, {
+    response_type: 'ephemeral',
+    text: 'Recorded approved on the GitHub issue.',
+  });
+
+  assert.deepEqual(payload, {
+    response_type: 'ephemeral',
+    text: 'Recorded approved on the GitHub issue.',
+    replace_original: false,
+  });
+});
+
+test('postReviewFindingActionThreadReply appends success text in the card thread', async () => {
+  const calls = [];
+  const result = await postReviewFindingActionThreadReply({
+    channel: { id: 'C123' },
+    message: { ts: '1780000000.000100' },
+  }, {
+    text: 'Recorded approved on the GitHub issue.',
+  }, async (...args) => {
+    calls.push(args);
+    return { ok: true, ts: '1780000001.000200' };
+  });
+
+  assert.deepEqual(calls, [[
+    'C123',
+    'Recorded approved on the GitHub issue.',
+    { thread_ts: '1780000000.000100' },
+  ]]);
+  assert.deepEqual(result, { ok: true, ts: '1780000001.000200' });
+});
+
+test('reviewFindingActionThreadTarget handles attachment containers', () => {
+  assert.deepEqual(reviewFindingActionThreadTarget({
+    container: {
+      channel_id: 'C456',
+      message_ts: '1780000002.000300',
+    },
+  }), {
+    channel: 'C456',
+    threadTs: '1780000002.000300',
+  });
+});
+
+test('resolveReviewFindingWorkflowBin prefers explicit env override', () => {
+  const explicit = '/tmp/custom-reviewer-env';
+  assert.equal(resolveReviewFindingWorkflowBin({
+    env: {
+      HOME: '/home/example/cl-zylos-auto-reviewer',
+      REVIEW_FINDING_WORKFLOW_BIN: explicit,
+    },
+    existsSync: candidate => candidate === explicit,
+  }), explicit);
+});
