@@ -57,3 +57,11 @@ export async function postReviewFindingActionThreadReply(body, response, sendTex
   const { channel, threadTs } = reviewFindingActionThreadTarget(body);
   return sendText(channel, text, { thread_ts: threadTs });
 }
+
+export function reviewFindingActionThreadReplyResponse(result, action) {
+  if (result?.slackThreadReply?.sent === true) return null;
+  return result?.slackThreadReply || result?.slackResponse || {
+    response_type: 'ephemeral',
+    text: `Recorded ${action.action_id.replace('review_finding_', '')} for the review finding.`,
+  };
+}

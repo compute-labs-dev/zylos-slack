@@ -6,6 +6,7 @@ import {
   postReviewFindingActionThreadReply,
   respondToAction,
   resolveReviewFindingWorkflowBin,
+  reviewFindingActionThreadReplyResponse,
   reviewFindingActionThreadTarget,
 } from '../src/lib/review-finding-actions.js';
 
@@ -78,6 +79,40 @@ test('postReviewFindingActionThreadReply accepts workflow slackThreadReply resul
     'Recorded rejected on the GitHub issue.',
     { thread_ts: '1780000000.000100' },
   ]]);
+});
+
+test('reviewFindingActionThreadReplyResponse skips replies already sent by workflow', () => {
+  assert.equal(reviewFindingActionThreadReplyResponse({
+    slackThreadReply: {
+      text: 'Decision recorded: APPROVED',
+      sent: true,
+    },
+  }, {
+    action_id: 'review_finding_approve',
+  }), null);
+});
+
+test('reviewFindingActionThreadReplyResponse returns unsent workflow thread replies', () => {
+  assert.deepEqual(reviewFindingActionThreadReplyResponse({
+    slackThreadReply: {
+      text: 'Decision recorded: REJECTED',
+      sent: false,
+    },
+  }, {
+    action_id: 'review_finding_reject',
+  }), {
+    text: 'Decision recorded: REJECTED',
+    sent: false,
+  });
+});
+
+test('reviewFindingActionThreadReplyResponse keeps default fallback for old workflows', () => {
+  assert.deepEqual(reviewFindingActionThreadReplyResponse({}, {
+    action_id: 'review_finding_redirect',
+  }), {
+    response_type: 'ephemeral',
+    text: 'Recorded redirect for the review finding.',
+  });
 });
 
 test('reviewFindingActionThreadTarget handles attachment containers', () => {

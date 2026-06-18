@@ -20,6 +20,7 @@ import {
   postReviewFindingActionThreadReply,
   respondToAction,
   resolveReviewFindingWorkflowBin,
+  reviewFindingActionThreadReplyResponse,
 } from './lib/review-finding-actions.js';
 
 // ── Constants ──
@@ -204,10 +205,10 @@ async function handleReviewFindingAction({ ack, body, respond }) {
 
   try {
     const result = await runReviewFindingWorkflowAction(body);
-    await postReviewFindingActionThreadReply(body, result.slackThreadReply || result.slackResponse || {
-      response_type: 'ephemeral',
-      text: `Recorded ${action.action_id.replace('review_finding_', '')} for the review finding.`,
-    }, sendText);
+    const threadReply = reviewFindingActionThreadReplyResponse(result, action);
+    if (threadReply) {
+      await postReviewFindingActionThreadReply(body, threadReply, sendText);
+    }
   } catch (err) {
     console.error('[slack] Review finding action failed:', err.message);
     if (err.stderr) console.error(err.stderr);
