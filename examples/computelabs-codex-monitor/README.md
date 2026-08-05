@@ -1,9 +1,11 @@
 # Compute Labs Codex Slack monitor
 
-This profile watches only private channel `C0BNXPB86RW` (`#eng-ax-codex`) and
-accepts messages only from Robert (`U07UP7DSSA0`) and Matt (`U087PB76PB7`). It
-uses Slack Socket Mode, so it does not need a public webhook URL or periodic
-polling.
+This profile watches private channels `C0828UQRLG6` (`#engineering-internal`)
+and `C0BNXPB86RW` (`#eng-ax-codex`) and accepts messages only from Robert
+(`U07UP7DSSA0`) and Matt (`U087PB76PB7`). Responses to messages seen in the old
+engineering channel are routed to `#eng-ax-codex`; the monitor never writes
+back into `#engineering-internal`. It uses Slack Socket Mode, so it does not
+need a public webhook URL or periodic polling.
 
 The listener starts one ephemeral, read-only Codex triage run only when an
 allowed message arrives. The result is posted in the source message's thread.
@@ -17,7 +19,7 @@ traffic mutations. Interactive engineering work remains a separate workflow.
 
 Create an app from `slack-app-manifest.yaml`, install it in the Compute Labs
 workspace, generate an app-level `xapp-` token with `connections:write`, and
-invite the bot only to `#eng-ax-codex`.
+invite the bot only to `#engineering-internal` and `#eng-ax-codex`.
 
 The manifest intentionally omits public-channel, direct-message, file read or
 write, admin, and workspace-wide scopes. `groups:history` reads only private
@@ -65,9 +67,11 @@ the process or setting `enabled` to `false` ends intake immediately.
 ## Acceptance checklist
 
 - `auth.test` identifies only the dedicated monitor bot.
-- `conversations.history` succeeds for `C0BNXPB86RW` and fails for a private
-  channel where the bot is not a member.
-- A Matt or Robert test message produces one thread reply.
+- `conversations.history` succeeds for `C0828UQRLG6` and `C0BNXPB86RW`, and
+  fails for a private channel where the bot is not a member.
+- A Matt or Robert test message in `#eng-ax-codex` produces one thread reply.
+- A message from `#engineering-internal` produces no reply there and one
+  source-linked response in `#eng-ax-codex`.
 - Multiple messages run serially; no more than 20 wait for triage.
 - A receiver failure posts one thread notice tagging AX instead of failing silently.
 - Replaying the same Slack event produces no second Codex run or reply.

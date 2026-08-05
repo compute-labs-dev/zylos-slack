@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { ReceiverQueue, receiverSettingsFromEnv, runReceiver } from '../src/lib/receiver.js';
+import {
+  ReceiverQueue, receiverDeliveryTarget, receiverSettingsFromEnv, runReceiver,
+} from '../src/lib/receiver.js';
 
 test('receiver settings are opt-in and parse args without a shell', () => {
   assert.equal(receiverSettingsFromEnv({}), null);
@@ -56,6 +58,41 @@ test('receiver queue serializes runs and rejects excess waiting work', async () 
   assert.deepEqual(starts, ['first', 'second']);
   releases.shift()('two');
   assert.equal(await second, 'two');
+});
+
+test('receiver responses stay in-thread by default', () => {
+  assert.deepEqual(receiverDeliveryTarget({
+    channel: 'C123',
+    messageTs: '1780000000.000100',
+    threadTs: '1780000000.000100',
+  }, {}), {
+    channel: 'C123',
+    messageTs: '1780000000.000100',
+    threadTs: '1780000000.000100',
+    prefix: '',
+  });
+});
+
+test('receiver responses can be routed out of a monitored source channel', () => {
+  assert.deepEqual(receiverDeliveryTarget({
+    channel: 'C0828UQRLG6',
+    messageTs: '1780000000.000100',
+    threadTs: '1780000000.000100',
+  }, {
+    workspaceUrl: 'https://computelabs.slack.com/',
+    groups: {
+      C0828UQRLG6: { responseChannel: 'C0BNXPB86RW' },
+    },
+  }), {
+    channel: 'C0BNXPB86RW',
+    messageTs: '1780000000.000100',
+    threadTs: undefined,
+    prefix: '*Read-only triage from <#C0828UQRLG6>* — <https://computelabs.slack.com/archives/C0828UQRLG6/p1780000000000100|source message>\n\n',
+  });
+
+  assert.throws(() => receiverDeliveryTarget({ channel: 'C123' }, {
+    groups: { C123: { responseChannel: 'not-a-channel' } },
+  }), /invalid receiver response channel/);
 });
 
 test('receiver receives JSON over stdin and returns bounded stdout', async () => {

@@ -2,6 +2,7 @@
   "enabled": true,
   "connection_mode": "socket",
   "webhook_port": 3461,
+  "workspaceUrl": "https://computelabs.slack.com",
   "owner": {
     "bound": false,
     "user_id": "",
@@ -11,6 +12,16 @@
   "dmAllowFrom": [],
   "groupPolicy": "allowlist",
   "groups": {
+    "C0828UQRLG6": {
+      "name": "engineering-internal",
+      "mode": "smart",
+      "allowFrom": [
+        "U07UP7DSSA0",
+        "U087PB76PB7"
+      ],
+      "historyLimit": 8,
+      "responseChannel": "C0BNXPB86RW"
+    },
     "C0BNXPB86RW": {
       "name": "eng-ax-codex",
       "mode": "smart",
@@ -26,4 +37,3 @@
     "useMarkdown": true
   }
 }
-
