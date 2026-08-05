@@ -29,8 +29,10 @@ console.log('[post-install] Running slack component setup...\n');
 
 // 1. Create subdirectories
 console.log('Creating subdirectories...');
-for (const sub of ['logs', 'media', 'typing']) {
-  fs.mkdirSync(path.join(DATA_DIR, sub), { recursive: true });
+for (const sub of ['logs', 'media', 'typing', 'receiver-dedup']) {
+  const directory = path.join(DATA_DIR, sub);
+  fs.mkdirSync(directory, { recursive: true, mode: sub === 'receiver-dedup' ? 0o700 : undefined });
+  if (sub === 'receiver-dedup') fs.chmodSync(directory, 0o700);
   console.log(`  - ${sub}/`);
 }
 

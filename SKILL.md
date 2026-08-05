@@ -64,6 +64,21 @@ SLACK_BOT_TOKEN=xoxb-...        # Bot User OAuth Token
 SLACK_APP_TOKEN=xapp-...        # App-Level Token (Socket Mode)
 ```
 
+An opt-in external receiver can replace C4 delivery for a dedicated process:
+
+```bash
+SLACK_RECEIVER_COMMAND=/absolute/path/to/receiver
+SLACK_RECEIVER_ARGS_JSON='[]'
+SLACK_RECEIVER_TIMEOUT_MS=600000
+SLACK_RECEIVER_MAX_QUEUE=20
+SLACK_RECEIVER_FAILURE_MENTION=U0123456789
+```
+
+The listener passes JSON on stdin with `source`, `endpoint`, and `content`.
+Stdout is posted into the source thread; exact `[SKIP]` is silent. The command
+is started without a shell, and successfully claimed Slack event IDs are kept
+in a content-free durable dedup store across reconnects.
+
 ### Runtime Config (~/zylos/components/slack/config.json)
 
 ```json

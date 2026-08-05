@@ -14,6 +14,8 @@ Slack communication channel for [Zylos](https://github.com/zylos-ai).
 - Markdown formatting via Slack blocks
 - Typing indicators
 - Admin CLI for runtime configuration
+- Optional shell-free external receiver for bounded agent runtimes
+- Durable, content-free event deduplication for external receivers
 
 ## Setup
 
@@ -67,6 +69,26 @@ SLACK_APP_TOKEN=xapp-your-app-token
 ```bash
 zylos add slack
 ```
+
+## Optional external receiver
+
+By default incoming messages go to the Zylos C4 bridge. A dedicated automation
+can instead set `SLACK_RECEIVER_COMMAND` to an executable. The message is sent
+as JSON on stdin; no Slack text is interpolated into a shell command. Stdout is
+posted back to the original Slack thread, while an exact `[SKIP]` produces no
+reply. Receiver event IDs are claimed in a mode-`0600` content-free dedup store
+so Socket Mode reconnects do not repeat the automation.
+
+```bash
+SLACK_RECEIVER_COMMAND=/absolute/path/to/receiver
+SLACK_RECEIVER_ARGS_JSON='[]'
+SLACK_RECEIVER_TIMEOUT_MS=600000
+SLACK_RECEIVER_MAX_QUEUE=20
+SLACK_RECEIVER_FAILURE_MENTION=U0123456789
+```
+
+The Compute Labs read-only Codex profile and least-privilege Slack manifest are
+in [`examples/computelabs-codex-monitor`](examples/computelabs-codex-monitor/README.md).
 
 ## License
 
