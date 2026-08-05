@@ -3,6 +3,7 @@
 import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 const MAX_INPUT_BYTES = 128 * 1024;
 const MAX_OUTPUT_BYTES = 64 * 1024;
@@ -48,6 +49,17 @@ function settings(env = process.env) {
     throw new Error(`CODEX_TRIAGE_ROOT is not a directory: ${root}`);
   }
   const timeout = Number.parseInt(env.CODEX_TRIAGE_TIMEOUT_MS || '', 10);
+  let binaryArgs = [];
+  if (env.CODEX_TRIAGE_ARGS_JSON) {
+    try {
+      binaryArgs = JSON.parse(env.CODEX_TRIAGE_ARGS_JSON);
+    } catch {
+      throw new Error('CODEX_TRIAGE_ARGS_JSON must be valid JSON');
+    }
+    if (!Array.isArray(binaryArgs) || binaryArgs.some(value => typeof value !== 'string')) {
+      throw new Error('CODEX_TRIAGE_ARGS_JSON must be a JSON array of strings');
+    }
+  }
   let operatorContext = '';
   if (env.CODEX_TRIAGE_CONTEXT_FILE) {
     const contextFile = path.resolve(env.CODEX_TRIAGE_CONTEXT_FILE);
@@ -60,6 +72,7 @@ function settings(env = process.env) {
   return {
     root,
     binary: env.CODEX_TRIAGE_BIN || 'codex',
+    binaryArgs,
     model: env.CODEX_TRIAGE_MODEL || 'gpt-5.6-sol',
     reasoning: env.CODEX_TRIAGE_REASONING || 'xhigh',
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS,
@@ -96,6 +109,7 @@ ${JSON.stringify(payload)}
 function runCodex(config, prompt) {
   return new Promise((resolve, reject) => {
     const args = [
+      ...config.binaryArgs,
       'exec',
       '--ephemeral',
       '--sandbox', 'read-only',
@@ -153,12 +167,20 @@ function runCodex(config, prompt) {
   });
 }
 
-try {
-  const payload = parsePayload(await readStdin());
-  const config = settings();
-  const output = await runCodex(config, promptFor(payload, config.operatorContext));
-  process.stdout.write(`${output || '[SKIP]'}\n`);
-} catch (error) {
-  console.error(`[codex-triage] ${error.message}`);
-  process.exitCode = 1;
+async function main() {
+  try {
+    const payload = parsePayload(await readStdin());
+    const config = settings();
+    const output = await runCodex(config, promptFor(payload, config.operatorContext));
+    process.stdout.write(`${output || '[SKIP]'}\n`);
+  } catch (error) {
+    console.error(`[codex-triage] ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+export { parsePayload, promptFor, runCodex, settings };
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
 }
