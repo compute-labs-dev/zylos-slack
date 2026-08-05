@@ -59,6 +59,30 @@ export function receiverSettingsFromEnv(env = process.env) {
   };
 }
 
+export function receiverDeliveryTarget(sourceTarget, config = {}) {
+  const configuredChannel = config.groups?.[sourceTarget.channel]?.responseChannel;
+  if (!configuredChannel || configuredChannel === sourceTarget.channel) {
+    return { ...sourceTarget, prefix: '' };
+  }
+  if (!/^[CG][A-Z0-9]+$/.test(configuredChannel)) {
+    throw new Error(`invalid receiver response channel: ${configuredChannel}`);
+  }
+
+  const workspaceUrl = String(config.workspaceUrl || '').trim().replace(/\/+$/, '');
+  const validWorkspaceUrl = /^https:\/\/[a-z0-9-]+\.slack\.com$/i.test(workspaceUrl);
+  const messagePathTs = String(sourceTarget.messageTs || '').replace('.', '');
+  const sourceLink = validWorkspaceUrl && messagePathTs
+    ? ` — <${workspaceUrl}/archives/${sourceTarget.channel}/p${messagePathTs}|source message>`
+    : '';
+
+  return {
+    channel: configuredChannel,
+    messageTs: sourceTarget.messageTs,
+    threadTs: undefined,
+    prefix: `*Read-only triage from <#${sourceTarget.channel}>*${sourceLink}\n\n`,
+  };
+}
+
 export class ReceiverQueue {
   constructor(run, { maxQueue = DEFAULT_MAX_QUEUE } = {}) {
     if (typeof run !== 'function') throw new Error('receiver queue requires a run function');

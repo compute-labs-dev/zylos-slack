@@ -15,7 +15,9 @@ import {
   fetchHistory, fetchThread, sendLongMessage, sendText,
 } from './lib/message.js';
 import { claimEvent, pruneEvents } from './lib/dedup-store.js';
-import { ReceiverQueue, receiverSettingsFromEnv, runReceiver } from './lib/receiver.js';
+import {
+  ReceiverQueue, receiverDeliveryTarget, receiverSettingsFromEnv, runReceiver,
+} from './lib/receiver.js';
 import {
   REVIEW_FINDING_ACTION_IDS,
   canUseReviewFindingAction,
@@ -547,12 +549,21 @@ function sendToAgent(source, endpoint, content, eventKey, onReject) {
     return;
   }
 
+  let deliveryTarget;
+  try {
+    deliveryTarget = receiverDeliveryTarget(endpointTarget(endpoint), config);
+  } catch (error) {
+    console.error(`[slack] Receiver response routing failed: ${error.message}`);
+    if (onReject) onReject('receiver response routing failed');
+    completeTyping(endpoint);
+    return;
+  }
+
   receiverQueue.enqueue({ source, endpoint, content })
     .then(async output => {
       if (!output || output === '[SKIP]') return;
-      const target = endpointTarget(endpoint);
-      await sendLongMessage(target.channel, output, {
-        thread_ts: target.threadTs,
+      await sendLongMessage(deliveryTarget.channel, `${deliveryTarget.prefix}${output}`, {
+        thread_ts: deliveryTarget.threadTs,
         useMarkdown: config.message?.useMarkdown ?? true,
       });
     })
@@ -560,9 +571,8 @@ function sendToAgent(source, endpoint, content, eventKey, onReject) {
       console.error(`[slack] Receiver failed: ${error.message}`);
       if (onReject) onReject(error.message);
       if (receiverSettings.failureMention) {
-        const target = endpointTarget(endpoint);
-        const notice = `<@${receiverSettings.failureMention}> Automated read-only triage failed (${error.message}). Please handle this message manually.`;
-        sendText(target.channel, notice, { thread_ts: target.threadTs }).catch(sendError => {
+        const notice = `${deliveryTarget.prefix}<@${receiverSettings.failureMention}> Automated read-only triage failed (${error.message}). Please handle this message manually.`;
+        sendText(deliveryTarget.channel, notice, { thread_ts: deliveryTarget.threadTs }).catch(sendError => {
           console.error(`[slack] Receiver failure notice failed: ${sendError.message}`);
         });
       }
