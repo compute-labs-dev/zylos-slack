@@ -1,0 +1,29 @@
+{
+  "enabled": true,
+  "connection_mode": "socket",
+  "webhook_port": 3461,
+  "owner": {
+    "bound": false,
+    "user_id": "",
+    "name": ""
+  },
+  "dmPolicy": "owner",
+  "dmAllowFrom": [],
+  "groupPolicy": "allowlist",
+  "groups": {
+    "C0BNXPB86RW": {
+      "name": "eng-ax-codex",
+      "mode": "smart",
+      "allowFrom": [
+        "U07UP7DSSA0",
+        "U087PB76PB7"
+      ],
+      "historyLimit": 8
+    }
+  },
+  "message": {
+    "context_messages": 8,
+    "useMarkdown": true
+  }
+}
+

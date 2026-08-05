@@ -12,8 +12,10 @@ import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './li
 import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
-  fetchHistory, fetchThread, sendText,
+  fetchHistory, fetchThread, sendLongMessage, sendText,
 } from './lib/message.js';
+import { claimEvent, pruneEvents } from './lib/dedup-store.js';
+import { ReceiverQueue, receiverSettingsFromEnv, runReceiver } from './lib/receiver.js';
 import {
   REVIEW_FINDING_ACTION_IDS,
   canUseReviewFindingAction,
@@ -30,6 +32,7 @@ const LOGS_DIR = path.join(DATA_DIR, 'logs');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const TYPING_DIR = path.join(DATA_DIR, 'typing');
 const REVIEW_FINDING_ACTION_DIR = path.join(DATA_DIR, 'review-finding-actions');
+const RECEIVER_DEDUP_DIR = path.join(DATA_DIR, 'receiver-dedup');
 const REVIEW_FINDING_WORKFLOW_BIN = resolveReviewFindingWorkflowBin();
 const REVIEW_FINDING_WORKFLOW_COMMAND = process.env.REVIEW_FINDING_WORKFLOW_COMMAND
   || 'computelabs-agent-workflow';
@@ -42,6 +45,8 @@ const chatHistories = new Map();
 
 let config = null;
 let app = null;
+let receiverSettings = null;
+let receiverQueue = null;
 
 // ── Startup ──
 
@@ -49,6 +54,13 @@ console.log('[slack] Starting...');
 console.log('[slack] Data directory:', DATA_DIR);
 
 config = getConfig();
+
+try {
+  receiverSettings = receiverSettingsFromEnv();
+} catch (error) {
+  console.error(`[slack] Invalid receiver configuration: ${error.message}`);
+  process.exit(1);
+}
 
 if (!config.enabled) {
   console.log('[slack] Component disabled, exiting.');
@@ -73,6 +85,16 @@ initClient(botToken);
 
 // Ensure directories exist
 [LOGS_DIR, MEDIA_DIR, TYPING_DIR, REVIEW_FINDING_ACTION_DIR].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+if (receiverSettings) {
+  fs.mkdirSync(RECEIVER_DEDUP_DIR, { recursive: true, mode: 0o700 });
+  fs.chmodSync(RECEIVER_DEDUP_DIR, 0o700);
+  pruneEvents(RECEIVER_DEDUP_DIR);
+  receiverQueue = new ReceiverQueue(
+    payload => runReceiver(receiverSettings, payload),
+    { maxQueue: receiverSettings.maxQueue },
+  );
+  console.log(`[slack] External receiver enabled: ${receiverSettings.command}`);
+}
 
 // Matches an explicit @mention of the bot, tolerating Slack's optional
 // `<@U123|displayname>` piped form. Used by BOTH the message and app_mention
@@ -178,6 +200,11 @@ async function main() {
       if (now - ts > DEDUP_TTL) dedupMap.delete(key);
     }
   }, 60_000);
+
+  if (receiverSettings) {
+    const pruneTimer = setInterval(() => pruneEvents(RECEIVER_DEDUP_DIR), 60 * 60 * 1000);
+    pruneTimer.unref?.();
+  }
 
   // Typing indicator check (every 2s)
   setInterval(checkTypingDone, 2000);
@@ -352,10 +379,10 @@ async function handleDM(event) {
   const fullContent = `<current-message>\n${threadContext}${content}\n</current-message>${attachmentBlock}`;
   const c4Message = `[Slack DM] ${userName} said: ${fullContent}`;
 
-  // Send to C4
-  sendToC4('slack', endpoint, c4Message, (rejectMsg) => {
+  const eventKey = event.client_msg_id || `${event.channel}-${event.ts}`;
+  sendToAgent('slack', endpoint, c4Message, eventKey, (rejectMsg) => {
     removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
-    console.warn(`[slack] C4 rejected DM from ${userName}: ${rejectMsg}`);
+    console.warn(`[slack] Agent receiver rejected DM from ${userName}: ${rejectMsg}`);
   });
 }
 
@@ -423,7 +450,23 @@ async function handleGroupMessage(event, isMention = false) {
 
   // Build group context
   const contextLimit = groupConfig?.historyLimit || config.message.context_messages;
-  const contextMsgs = history.slice(-contextLimit - 1, -1); // exclude current
+  let contextMsgs = history.slice(-contextLimit - 1, -1); // exclude current
+  if (event.thread_ts) {
+    try {
+      const replies = await fetchThread(event.channel, event.thread_ts, contextLimit + 1, {
+        includeParent: true,
+      });
+      const resolved = [];
+      for (const reply of replies) {
+        if (reply.ts === event.ts) continue;
+        const from = reply.user ? await getUserName(reply.user) : 'bot';
+        resolved.push({ from, text: reply.text || '(media)', ts: reply.ts });
+      }
+      contextMsgs = resolved.slice(-contextLimit);
+    } catch (error) {
+      console.warn(`[slack] Failed to fetch group thread context: ${error.message}`);
+    }
+  }
   let groupContext = '';
   if (contextMsgs.length > 0) {
     const lines = contextMsgs.map(m => `${m.from}: ${m.text}`);
@@ -457,15 +500,75 @@ async function handleGroupMessage(event, isMention = false) {
   const fullContent = `<current-message>\n${groupContext}${content}\n</current-message>${attachmentBlock}`;
   const c4Message = `[Slack GROUP:${groupName}] ${userName} said: ${fullContent}${smartHint}`;
 
-  sendToC4('slack', endpoint, c4Message, (rejectMsg) => {
+  const eventKey = event.client_msg_id || `${event.channel}-${event.ts}`;
+  sendToAgent('slack', endpoint, c4Message, eventKey, (rejectMsg) => {
     if (isMention || !isSmartNoMention) {
       removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
     }
-    console.warn(`[slack] C4 rejected group msg from ${userName}: ${rejectMsg}`);
+    console.warn(`[slack] Agent receiver rejected group msg from ${userName}: ${rejectMsg}`);
   });
 }
 
 // ── C4 Integration ──
+
+function endpointTarget(endpoint) {
+  const [channel, ...rawParts] = endpoint.split('|');
+  const parts = Object.fromEntries(rawParts.map(part => {
+    const split = part.indexOf(':');
+    return split === -1 ? [part, ''] : [part.slice(0, split), part.slice(split + 1)];
+  }));
+  return { channel, messageTs: parts.msg, threadTs: parts.thread || parts.msg };
+}
+
+function completeTyping(endpoint) {
+  const { channel, messageTs } = endpointTarget(endpoint);
+  if (!channel || !messageTs) return;
+  removeReaction(channel, messageTs, 'hourglass_flowing_sand').catch(() => {});
+  typingTrackers.delete(`${channel}-${messageTs}`);
+}
+
+function sendToAgent(source, endpoint, content, eventKey, onReject) {
+  if (!receiverSettings) {
+    sendToC4(source, endpoint, content, onReject);
+    return;
+  }
+
+  let claimed = false;
+  try {
+    claimed = claimEvent(RECEIVER_DEDUP_DIR, eventKey);
+  } catch (error) {
+    console.error(`[slack] Receiver dedup failed: ${error.message}`);
+    if (onReject) onReject('receiver dedup failed');
+    return;
+  }
+  if (!claimed) {
+    console.log(`[slack] Receiver duplicate ignored: ${eventKey}`);
+    completeTyping(endpoint);
+    return;
+  }
+
+  receiverQueue.enqueue({ source, endpoint, content })
+    .then(async output => {
+      if (!output || output === '[SKIP]') return;
+      const target = endpointTarget(endpoint);
+      await sendLongMessage(target.channel, output, {
+        thread_ts: target.threadTs,
+        useMarkdown: config.message?.useMarkdown ?? true,
+      });
+    })
+    .catch(error => {
+      console.error(`[slack] Receiver failed: ${error.message}`);
+      if (onReject) onReject(error.message);
+      if (receiverSettings.failureMention) {
+        const target = endpointTarget(endpoint);
+        const notice = `<@${receiverSettings.failureMention}> Automated read-only triage failed (${error.message}). Please handle this message manually.`;
+        sendText(target.channel, notice, { thread_ts: target.threadTs }).catch(sendError => {
+          console.error(`[slack] Receiver failure notice failed: ${sendError.message}`);
+        });
+      }
+    })
+    .finally(() => completeTyping(endpoint));
+}
 
 function sendToC4(source, endpoint, content, onReject) {
   const safeContent = content.replace(/'/g, "'\\''");
@@ -543,6 +646,7 @@ function buildEndpoint(channel, type, msgTs, threadTs) {
 }
 
 function logMessage(channelId, entry) {
+  if (process.env.SLACK_MESSAGE_LOGGING === 'disabled') return;
   const logFile = path.join(LOGS_DIR, `${channelId}.log`);
   const line = JSON.stringify({ ...entry, time: new Date().toISOString() });
   fs.appendFileSync(logFile, line + '\n');

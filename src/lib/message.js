@@ -194,14 +194,15 @@ export async function fetchHistory(channel, limit = 10, latest) {
 /**
  * Fetch thread replies.
  */
-export async function fetchThread(channel, threadTs, limit = 10) {
+export async function fetchThread(channel, threadTs, limit = 10, { includeParent = false } = {}) {
   const client = getClient();
   const res = await client.conversations.replies({
     channel,
     ts: threadTs,
     limit,
   });
-  return (res.messages || []).slice(1); // exclude parent
+  const messages = res.messages || [];
+  return includeParent ? messages : messages.slice(1);
 }
 
 /**
