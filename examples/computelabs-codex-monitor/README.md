@@ -34,13 +34,13 @@ Store credentials in `~/creds/slack/cl-codex-monitor.env` with mode `0600`:
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_TOKEN=xapp-...
 SLACK_RECEIVER_COMMAND=/absolute/path/to/node
-SLACK_RECEIVER_ARGS_JSON=["/absolute/path/to/zylos-slack/scripts/codex-triage.js"]
+SLACK_RECEIVER_ARGS_JSON='["/absolute/path/to/zylos-slack/scripts/codex-triage.js"]'
 SLACK_RECEIVER_TIMEOUT_MS=600000
 SLACK_RECEIVER_MAX_QUEUE=20
 SLACK_RECEIVER_FAILURE_MENTION=U06TDSQR7BJ
 SLACK_MESSAGE_LOGGING=disabled
 CODEX_TRIAGE_BIN=/absolute/path/to/node
-CODEX_TRIAGE_ARGS_JSON=["/absolute/path/to/codex.js"]
+CODEX_TRIAGE_ARGS_JSON='["/absolute/path/to/codex.js"]'
 CODEX_TRIAGE_ROOT=/Users/xingfanxia/projects/work/cl/financing-platform/cl-backend-monorepo
 CODEX_TRIAGE_CONTEXT_FILE=/Users/xingfanxia/projects/work/cl/SLACK-CODEX-MONITOR.md
 CODEX_TRIAGE_MODEL=gpt-5.6-sol
@@ -51,6 +51,9 @@ Use absolute paths for Node and pass both JavaScript entrypoints as JSON-array
 arguments. A macOS LaunchAgent does not inherit the interactive shell's `PATH`;
 executing either `#!/usr/bin/env node` entrypoint directly can therefore fail
 with exit code 127 even though the commands work in a terminal.
+Keep the JSON arrays in single quotes because the launcher loads this file with
+`source`; otherwise the shell removes the JSON string quotes before the monitor
+parses the values.
 
 Do not add these values to a repository, Vercel, or the shared Navigator Slack
 bot. This monitor needs its own app because the Navigator bot correctly has
