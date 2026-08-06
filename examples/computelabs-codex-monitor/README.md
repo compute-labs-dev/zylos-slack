@@ -1,21 +1,18 @@
-# Compute Labs Codex Slack monitor
+# Compute Labs Codex Slack monitor (retired)
 
-This profile watches private channels `C0828UQRLG6` (`#engineering-internal`)
-and `C0BNXPB86RW` (`#eng-ax-codex`) and accepts messages only from Robert
-(`U07UP7DSSA0`) and Matt (`U087PB76PB7`). Responses to messages seen in the old
-engineering channel are routed to `#eng-ax-codex`; the monitor never writes
-back into `#engineering-internal`. It uses Slack Socket Mode, so it does not
-need a public webhook URL or periodic polling.
+This profile is retained as a disabled rollback and diagnostic reference. Do
+not deploy it as a background listener. Compute Labs feedback is now fetched
+deliberately by an interactive Codex session while working on a relevant
+development task, scoped by repository, pull request, issue, or thread. Routine
+channel conversation must not start Codex or receive an automated reply.
 
-The listener starts one ephemeral, read-only Codex triage run only when an
-allowed message arrives. The result is posted in the source message's thread.
-`[SKIP]` produces no reply. The runner cannot opt itself into file writes: it
-always invokes `codex exec --sandbox read-only` with untrusted-command approval,
-and its prompt explicitly
-prohibits GitHub, Jira/Linear, Slack, cloud, database, secret, deployment, and
-traffic mutations. Interactive engineering work remains a separate workflow.
+`config.json` therefore defaults to `enabled: false`. Both historical channels
+also use mention mode as defense in depth; `smart` mode is forbidden for this
+profile because it treats ordinary messages from allowlisted people as agent
+requests. The Slack app and read-only runner remain documented below only for
+controlled diagnostics or an explicitly approved future reactivation.
 
-## Slack app
+## Historical Slack app boundary
 
 Create an app from `slack-app-manifest.yaml`, install it in the Compute Labs
 workspace, generate an app-level `xapp-` token with `connections:write`, and
@@ -59,10 +56,11 @@ Do not add these values to a repository, Vercel, or the shared Navigator Slack
 bot. This monitor needs its own app because the Navigator bot correctly has
 write-only scopes.
 
-## Runtime config
+## Diagnostic runtime config
 
-Copy `config.json` to `~/zylos/components/slack/config.json`. Run the listener
-with the credential file loaded into its process environment:
+Keep `config.json` disabled when copying it to
+`~/zylos/components/slack/config.json`. For a controlled diagnostic only, load
+the credential file into the foreground process environment:
 
 ```bash
 set -a
@@ -71,24 +69,16 @@ set +a
 node /absolute/path/to/zylos-slack/src/index.js
 ```
 
-For a persistent deployment, use a process supervisor on an always-on internal
-host and keep the same environment/config paths. Stop is fail-safe: stopping
-the process or setting `enabled` to `false` ends intake immediately.
+Do not install a process supervisor, LaunchAgent, timer, or persistent listener
+for this profile. Setting `enabled` to `true` is an explicit temporary operator
+action; keep both channels in mention mode and stop the foreground process when
+the diagnostic ends.
 
-## Acceptance checklist
+## Retirement checklist
 
-- `auth.test` identifies only the dedicated monitor bot.
-- `conversations.history` succeeds for `C0828UQRLG6` and `C0BNXPB86RW`, and
-  fails for a private channel where the bot is not a member.
-- A Matt or Robert test message in `#eng-ax-codex` produces one thread reply.
-- A message from `#engineering-internal` produces no reply there and one
-  source-linked response in `#eng-ax-codex`.
-- Multiple messages run serially; no more than 20 wait for triage.
-- A receiver failure posts one thread notice tagging AX instead of failing silently.
-- Replaying the same Slack event produces no second Codex run or reply.
-- A message from AX or another member produces no Codex run.
-- The generated Codex command contains `--ephemeral --sandbox read-only` and
-  `approval_policy="untrusted"`.
-- No Slack message content appears in the receiver-dedup directory.
+- The profile has `enabled: false` and every configured channel uses `mention`.
+- The local LaunchAgent is unloaded and disabled.
+- Ordinary Robert/Matt messages produce no Codex run and no Slack reply.
+- Interactive sessions fetch only task-relevant Slack context when development
+  work needs current feedback.
 - No Slack message body is written to local component logs.
-- Removing the app from the channel or stopping the process stops monitoring.
