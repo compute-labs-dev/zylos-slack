@@ -87,8 +87,10 @@ SLACK_RECEIVER_MAX_QUEUE=20
 SLACK_RECEIVER_FAILURE_MENTION=U0123456789
 ```
 
-The Compute Labs read-only Codex profile and least-privilege Slack manifest are
-in [`examples/computelabs-codex-monitor`](examples/computelabs-codex-monitor/README.md).
+The retired Compute Labs read-only Codex profile is kept as a disabled diagnostic
+reference in
+[`examples/computelabs-codex-monitor`](examples/computelabs-codex-monitor/README.md).
+Do not deploy it as a background listener.
 
 ## License
 

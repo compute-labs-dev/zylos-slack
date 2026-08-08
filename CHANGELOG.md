@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Retire the Compute Labs background Codex monitor profile. It now defaults to
+  disabled and mention-only so ordinary channel conversation cannot launch a
+  triage run or receive an automated reply.
+
 ## 0.1.2 (2026-05-28)
 
 - Fix: tagged @mentions were silently dropped after a Socket Mode reconnect. The `message` handler now detects mentions itself (app_mention event delivery is unreliable across reconnects) instead of deferring to `app_mention`; both paths share a `mention-<channel>-<ts>` dedup key for exactly-once handling.

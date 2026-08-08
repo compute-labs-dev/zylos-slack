@@ -1,5 +1,5 @@
 {
-  "enabled": true,
+  "enabled": false,
   "connection_mode": "socket",
   "webhook_port": 3461,
   "workspaceUrl": "https://computelabs.slack.com",
@@ -14,7 +14,7 @@
   "groups": {
     "C0828UQRLG6": {
       "name": "engineering-internal",
-      "mode": "smart",
+      "mode": "mention",
       "allowFrom": [
         "U07UP7DSSA0",
         "U087PB76PB7"
@@ -24,7 +24,7 @@
     },
     "C0BNXPB86RW": {
       "name": "eng-ax-codex",
-      "mode": "smart",
+      "mode": "mention",
       "allowFrom": [
         "U07UP7DSSA0",
         "U087PB76PB7"
