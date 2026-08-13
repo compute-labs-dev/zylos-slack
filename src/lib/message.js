@@ -62,6 +62,7 @@ export async function sendLongMessage(channel, text, opts = {}) {
   const maxLen = opts.useMarkdown ? 2800 : 3800;
   const chunks = splitMessage(text, maxLen);
   let lastTs = opts.thread_ts;
+  let firstResponse = null;
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
@@ -69,17 +70,19 @@ export async function sendLongMessage(channel, text, opts = {}) {
     if (lastTs) sendOpts.thread_ts = lastTs;
 
     let res;
-    if (opts.useMarkdown && hasMarkdown(chunk)) {
+    if (opts.useMarkdown) {
       res = await sendMarkdown(channel, chunk, sendOpts);
     } else {
       res = await sendText(channel, chunk, sendOpts);
     }
+    if (!firstResponse) firstResponse = res;
 
     // For DMs, use the first message's ts as thread for subsequent chunks
     if (i === 0 && !lastTs && res.ts) {
       lastTs = res.ts;
     }
   }
+  return firstResponse;
 }
 
 /**
@@ -246,8 +249,4 @@ function splitMessage(text, maxLen) {
     remaining = remaining.substring(splitAt).trimStart();
   }
   return chunks;
-}
-
-function hasMarkdown(text) {
-  return /```|^\s*#{1,3}\s|\*\*|__|\|.*\|.*\|/m.test(text);
 }

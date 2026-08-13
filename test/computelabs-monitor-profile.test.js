@@ -7,12 +7,12 @@ const profileUrl = new URL(
   import.meta.url,
 );
 
-test('Compute Labs monitor profile is opt-in and never consumes ordinary channel messages', () => {
+test('Compute Labs monitor profile accepts mentions and bot-owned task threads only', () => {
   const profile = JSON.parse(fs.readFileSync(profileUrl, 'utf8'));
 
-  assert.equal(profile.enabled, false);
+  assert.equal(profile.enabled, true);
   assert.ok(Object.keys(profile.groups).length > 0);
   for (const group of Object.values(profile.groups)) {
-    assert.equal(group.mode, 'mention');
+    assert.equal(group.mode, 'task');
   }
 });

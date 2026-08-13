@@ -20,7 +20,7 @@ export const DEFAULT_CONFIG = {
   dmAllowFrom: [],                // user IDs allowed to DM (when dmPolicy='allowlist')
 
   groupPolicy: 'allowlist',       // 'open' | 'allowlist' | 'disabled'
-  groups: {},                      // per-channel config: { C0123: { name, mode, allowFrom, historyLimit } }
+  groups: {},                      // mode: mention | task (registered threads) | smart
 
   message: {
     context_messages: 10,

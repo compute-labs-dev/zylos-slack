@@ -2,9 +2,14 @@
 
 ## Unreleased
 
-- Retire the Compute Labs background Codex monitor profile. It now defaults to
-  disabled and mention-only so ordinary channel conversation cannot launch a
-  triage run or receive an automated reply.
+- Add task-thread mode: explicit bot mentions and replies inside unexpired,
+  bot-registered task threads may reach the receiver; unrelated channel
+  messages fail closed before any model call.
+- Add a dedicated Compute Labs bot sender that records content-free task thread
+  ownership with bounded expiry. This aligns outbound identity with the inbound
+  trigger instead of posting routine Codex messages as AX.
+- Reactivate the Compute Labs Socket Mode profile in task-thread mode. The
+  former all-message `smart` mode remains forbidden for this deployment.
 
 ## 0.1.2 (2026-05-28)
 

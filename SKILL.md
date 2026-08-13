@@ -110,7 +110,7 @@ node ~/zylos/.claude/skills/slack/src/admin.js <command> [args]
 | `add-dm-allow <user_id>` | Add user to DM allowlist |
 | `remove-dm-allow <user_id>` | Remove from DM allowlist |
 | `list-groups` | List configured channels |
-| `add-group <channel_id> <name> [mode]` | Add channel (mode: mention\|smart) |
+| `add-group <channel_id> <name> [mode]` | Add channel (mode: mention\|task\|smart) |
 | `remove-group <channel_id>` | Remove channel |
 | `set-group-policy <disabled\|allowlist\|open>` | Set channel access policy |
 | `set-markdown <on\|off>` | Toggle markdown formatting |

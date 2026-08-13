@@ -25,6 +25,8 @@ import {
   respondToAction,
   resolveReviewFindingWorkflowBin,
 } from './lib/review-finding-actions.js';
+import { classifyGroupMessage } from './lib/group-routing.js';
+import { isActiveTaskThread, pruneTaskThreads } from './lib/task-thread-store.js';
 
 // ── Constants ──
 
@@ -35,6 +37,7 @@ const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const TYPING_DIR = path.join(DATA_DIR, 'typing');
 const REVIEW_FINDING_ACTION_DIR = path.join(DATA_DIR, 'review-finding-actions');
 const RECEIVER_DEDUP_DIR = path.join(DATA_DIR, 'receiver-dedup');
+const TASK_THREADS_DIR = path.join(DATA_DIR, 'task-threads');
 const REVIEW_FINDING_WORKFLOW_BIN = resolveReviewFindingWorkflowBin();
 const REVIEW_FINDING_WORKFLOW_COMMAND = process.env.REVIEW_FINDING_WORKFLOW_COMMAND
   || 'computelabs-agent-workflow';
@@ -86,7 +89,10 @@ if (config.connection_mode === 'socket' && !appToken) {
 initClient(botToken);
 
 // Ensure directories exist
-[LOGS_DIR, MEDIA_DIR, TYPING_DIR, REVIEW_FINDING_ACTION_DIR].forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+[LOGS_DIR, MEDIA_DIR, TYPING_DIR, REVIEW_FINDING_ACTION_DIR, TASK_THREADS_DIR]
+  .forEach(dir => fs.mkdirSync(dir, { recursive: true }));
+fs.chmodSync(TASK_THREADS_DIR, 0o700);
+pruneTaskThreads(TASK_THREADS_DIR);
 if (receiverSettings) {
   fs.mkdirSync(RECEIVER_DEDUP_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(RECEIVER_DEDUP_DIR, 0o700);
@@ -207,6 +213,12 @@ async function main() {
     const pruneTimer = setInterval(() => pruneEvents(RECEIVER_DEDUP_DIR), 60 * 60 * 1000);
     pruneTimer.unref?.();
   }
+
+  const taskThreadPruneTimer = setInterval(
+    () => pruneTaskThreads(TASK_THREADS_DIR),
+    60 * 60 * 1000,
+  );
+  taskThreadPruneTimer.unref?.();
 
   // Typing indicator check (every 2s)
   setInterval(checkTypingDone, 2000);
@@ -393,7 +405,6 @@ async function handleDM(event) {
 async function handleGroupMessage(event, isMention = false) {
   const channelId = event.channel;
   const userId = event.user;
-  const userName = await getUserName(userId);
   const isOwner = userId === config.owner?.user_id;
 
   // Check group policy
@@ -414,12 +425,22 @@ async function handleGroupMessage(event, isMention = false) {
 
   const mode = groupConfig?.mode || 'mention';
   const groupName = groupConfig?.name || channelId;
+  const activeTaskThread = Boolean(event.thread_ts) && isActiveTaskThread(
+    TASK_THREADS_DIR,
+    channelId,
+    event.thread_ts,
+  );
+  const route = classifyGroupMessage({
+    mode,
+    isMention,
+    isOwner,
+    hasActiveTaskThread: activeTaskThread,
+  });
+  if (route === 'ignore') return;
 
-  // In mention mode, only respond to @mentions
-  if (mode === 'mention' && !isMention && !isOwner) return;
-
-  // Smart mode: receive all but flag non-mentions
-  const isSmartNoMention = mode === 'smart' && !isMention;
+  const userName = await getUserName(userId);
+  const isSmartNoMention = route === 'smart' && !isMention;
+  const isTaskThreadReply = route === 'task-thread';
 
   // Build message content
   let content = '';
@@ -494,6 +515,8 @@ async function handleGroupMessage(event, isMention = false) {
     smartHint = '\n(You were directly @mentioned — you MUST reply. Do not respond with [SKIP].)';
   } else if (isSmartNoMention) {
     smartHint = '\n(No @mention. Read the message and decide: reply only if you can genuinely help, otherwise reply with exactly [SKIP].)';
+  } else if (isTaskThreadReply) {
+    smartHint = '\n(This is a reply in an active task thread created by the Codex monitor bot. Treat its supplied thread context as task context. Reply to an ask, blocker, correction, or decision; return exactly [SKIP] for acknowledgements or unrelated chatter.)';
   }
 
   const attachmentBlock = fileLine
