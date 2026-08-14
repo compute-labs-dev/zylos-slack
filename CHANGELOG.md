@@ -10,6 +10,9 @@
   trigger instead of posting routine Codex messages as AX.
 - Reactivate the Compute Labs Socket Mode profile in task-thread mode. The
   former all-message `smart` mode remains forbidden for this deployment.
+- Add an explicit, author-verified migration command for recent legacy AX task
+  threads so active pre-cutover discussions can move to the bot without
+  scanning or bulk-registering Slack history.
 
 ## 0.1.2 (2026-05-28)
 

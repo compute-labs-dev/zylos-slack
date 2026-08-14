@@ -75,6 +75,22 @@ printf '%s\n' 'Follow-up' | cl-codex-slack-send \
   --thread-ts 1786645179.152059
 ```
 
+During the AX-to-bot transition, adopt one explicitly identified legacy task
+thread before replying to it:
+
+```bash
+cl-codex-slack-adopt-thread \
+  --channel C0BNXPB86RW \
+  --thread-ts 1786574361.203089 \
+  --task AX-143 \
+  --expected-author U06TDSQR7BJ
+```
+
+This command does not search Slack. It fetches only the exact parent, verifies
+that it is a human-authored root by the expected user and no more than 30 days
+old, then creates a seven-day registry entry (30-day maximum). Message content
+is never persisted. Do not bulk-adopt AX history.
+
 ## Runtime
 
 Copy `config.json` to `~/zylos/components/slack/config.json`. The production
