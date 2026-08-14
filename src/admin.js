@@ -27,7 +27,7 @@ Commands:
   remove-dm-allow <user_id>         Remove from DM allowlist
 
   list-groups                       List configured channels
-  add-group <channel_id> <name> [mode]   Add channel (mode: mention|smart)
+  add-group <channel_id> <name> [mode]   Add channel (mode: mention|task|smart)
   remove-group <channel_id>         Remove channel
   set-group-policy <disabled|allowlist|open>  Set channel access policy
   set-group-allowfrom <channel_id> <id1,id2>  Per-channel sender whitelist
@@ -129,11 +129,11 @@ switch (command) {
     const name = args[2];
     const mode = args[3] || 'mention';
     if (!channelId || !name) {
-      console.error('Usage: add-group <channel_id> <name> [mention|smart]');
+      console.error('Usage: add-group <channel_id> <name> [mention|task|smart]');
       process.exit(1);
     }
-    if (!['mention', 'smart'].includes(mode)) {
-      console.error('Mode must be "mention" or "smart"');
+    if (!['mention', 'task', 'smart'].includes(mode)) {
+      console.error('Mode must be "mention", "task", or "smart"');
       process.exit(1);
     }
     if (!config.groups) config.groups = {};

@@ -10,7 +10,7 @@ Slack communication channel for [Zylos](https://github.com/zylos-ai).
 - Thread-aware replies
 - File/image upload and download
 - Access control (DM policy + per-channel allowlists)
-- Smart mode (receive all channel messages) and mention mode
+- Smart mode, mention mode, and task-thread mode
 - Markdown formatting via Slack blocks
 - Typing indicators
 - Admin CLI for runtime configuration
@@ -87,10 +87,9 @@ SLACK_RECEIVER_MAX_QUEUE=20
 SLACK_RECEIVER_FAILURE_MENTION=U0123456789
 ```
 
-The retired Compute Labs read-only Codex profile is kept as a disabled diagnostic
-reference in
+The Compute Labs read-only Codex profile uses bot-authored task threads so team
+replies can resume bounded triage without consuming unrelated conversation. See
 [`examples/computelabs-codex-monitor`](examples/computelabs-codex-monitor/README.md).
-Do not deploy it as a background listener.
 
 ## License
 

@@ -20,12 +20,12 @@ export function getClient() {
 /**
  * Fetch and cache bot identity.
  */
-export async function fetchBotIdentity() {
+export async function fetchBotIdentity({ log = true } = {}) {
   const client = getClient();
   const res = await client.auth.test();
   botUserId = res.user_id;
   botName = res.user;
-  console.log(`[slack] Bot identity: @${botName} (${botUserId})`);
+  if (log) console.log(`[slack] Bot identity: @${botName} (${botUserId})`);
   return { userId: botUserId, name: botName };
 }
 

@@ -1,20 +1,22 @@
-# Compute Labs Codex Slack monitor (retired)
+# Compute Labs Codex Slack monitor
 
-This profile is retained as a disabled rollback and diagnostic reference. Do
-not deploy it as a background listener. Compute Labs feedback is now fetched
-deliberately by an interactive Codex session while working on a relevant
-development task, scoped by repository, pull request, issue, or thread. Routine
-channel conversation must not start Codex or receive an automated reply.
+This profile gives Compute Labs one consistent agent identity: routine Codex
+project messages are posted by the dedicated `CL Codex Monitor` bot, and replies
+inside those bot-owned task threads can resume read-only triage without an
+additional mention. Ordinary channel conversation never reaches Codex.
 
-`config.json` therefore defaults to `enabled: false`. Both historical channels
-also use mention mode as defense in depth; `smart` mode is forbidden for this
-profile because it treats ordinary messages from allowlisted people as agent
-requests. The Slack app and read-only runner remain documented below only for
-controlled diagnostics or an explicitly approved future reactivation.
+The deterministic intake boundary accepts only:
 
-## Historical Slack app boundary
+- an explicit mention of the monitor bot from an allowed sender; or
+- a reply from an allowed sender inside an unexpired thread registered by the
+  bot sender.
 
-Create an app from `slack-app-manifest.yaml`, install it in the Compute Labs
+`smart` mode is forbidden for this profile. Relevance is not delegated to a
+model until channel, sender, and task-thread ownership have all been checked.
+
+## Slack app boundary
+
+Create the app from `slack-app-manifest.yaml`, install it in the Compute Labs
 workspace, generate an app-level `xapp-` token with `connections:write`, and
 invite the bot only to `#engineering-internal` and `#eng-ax-codex`.
 
@@ -44,41 +46,70 @@ CODEX_TRIAGE_MODEL=gpt-5.6-sol
 CODEX_TRIAGE_REASONING=xhigh
 ```
 
-Use absolute paths for Node and pass both JavaScript entrypoints as JSON-array
-arguments. A macOS LaunchAgent does not inherit the interactive shell's `PATH`;
-executing either `#!/usr/bin/env node` entrypoint directly can therefore fail
-with exit code 127 even though the commands work in a terminal.
-Keep the JSON arrays in single quotes because the launcher loads this file with
-`source`; otherwise the shell removes the JSON string quotes before the monitor
-parses the values.
+Use absolute paths for Node and both JavaScript entrypoints. A LaunchAgent does
+not inherit the interactive shell's `PATH`. Keep JSON arrays single-quoted when
+the launcher loads this file with `source`. Never print or persist token values.
 
-Do not add these values to a repository, Vercel, or the shared Navigator Slack
-bot. This monitor needs its own app because the Navigator bot correctly has
-write-only scopes.
+## Bot-authored outbound messages
 
-## Diagnostic runtime config
-
-Keep `config.json` disabled when copying it to
-`~/zylos/components/slack/config.json`. For a controlled diagnostic only, load
-the credential file into the foreground process environment:
+Interactive Codex sessions must send routine Compute Labs project coordination
+through the dedicated wrapper, not through a user-authenticated Slack connector:
 
 ```bash
-set -a
-source ~/creds/slack/cl-codex-monitor.env
-set +a
-node /absolute/path/to/zylos-slack/src/index.js
+printf '%s\n\n%s\n' '*Review requested*' 'Please review PR #123.' | cl-codex-slack-send \
+  --channel C0BNXPB86RW \
+  --task AX-143
 ```
 
-Do not install a process supervisor, LaunchAgent, timer, or persistent listener
-for this profile. Setting `enabled` to `true` is an explicit temporary operator
-action; keep both channels in mention mode and stop the foreground process when
-the diagnostic ends.
+The command posts as the bot, then stores only `channel`, `thread_ts`, task
+label, creation time, and expiry under
+`~/zylos/components/slack/task-threads/`. It never stores the Slack message
+body. The default thread lifetime is 30 days and the maximum is 90 days.
 
-## Retirement checklist
+To reply as the bot without creating another task root:
 
-- The profile has `enabled: false` and every configured channel uses `mention`.
-- The local LaunchAgent is unloaded and disabled.
-- Ordinary Robert/Matt messages produce no Codex run and no Slack reply.
-- Interactive sessions fetch only task-relevant Slack context when development
-  work needs current feedback.
-- No Slack message body is written to local component logs.
+```bash
+printf '%s\n' 'Follow-up' | cl-codex-slack-send \
+  --channel C0BNXPB86RW \
+  --task AX-143 \
+  --thread-ts 1786645179.152059
+```
+
+During the AX-to-bot transition, adopt one explicitly identified legacy task
+thread before replying to it:
+
+```bash
+cl-codex-slack-adopt-thread \
+  --channel C0BNXPB86RW \
+  --thread-ts 1786574361.203089 \
+  --task AX-143 \
+  --expected-author U06TDSQR7BJ
+```
+
+This command does not search Slack. It fetches only the exact parent, verifies
+that it is a human-authored root by the expected user and no more than 30 days
+old, then creates a seven-day registry entry (30-day maximum). Message content
+is never persisted. Do not bulk-adopt AX history.
+
+## Runtime
+
+Copy `config.json` to `~/zylos/components/slack/config.json`. The production
+LaunchAgent starts the Socket Mode listener at login and restarts it only after
+an unexpected failure. Setting `enabled` to `false` causes a clean stop.
+
+## Acceptance checklist
+
+- `auth.test` identifies only the dedicated monitor bot.
+- A bot sender root is visible as `CL Codex Monitor` and creates one mode-`0600`
+  content-free task-thread record.
+- A Robert or Matt reply in that root reaches one read-only Codex triage run and
+  any response is posted by the bot in the same thread.
+- A Robert or Matt message in an unrelated thread or at channel top level
+  produces no Codex run, reaction, or reply.
+- An explicit bot mention from an allowed sender still works.
+- Messages from other senders do not reach the receiver.
+- Replaying the same Slack event produces no second run or reply.
+- Expired, malformed, cross-channel, and path-like registry values fail closed.
+- The generated Codex command contains `--ephemeral --sandbox read-only` and
+  `approval_policy="untrusted"`.
+- No Slack message content appears in the task-thread or receiver-dedup stores.
