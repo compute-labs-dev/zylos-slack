@@ -205,6 +205,69 @@ export async function fetchThread(channel, threadTs, limit = 10, { includeParent
   return includeParent ? messages : messages.slice(1);
 }
 
+function slackBlockText(block) {
+  if (!block || typeof block !== 'object') return '';
+  const values = [];
+  if (typeof block.text === 'string') values.push(block.text);
+  if (typeof block.text?.text === 'string') values.push(block.text.text);
+  for (const field of block.fields || []) {
+    if (typeof field === 'string') values.push(field);
+    else if (typeof field?.text === 'string') values.push(field.text);
+  }
+  for (const element of block.elements || []) {
+    if (typeof element?.text === 'string') values.push(element.text);
+    else if (typeof element?.text?.text === 'string') values.push(element.text.text);
+  }
+  return values.map(value => value.trim()).filter(Boolean).join(' ');
+}
+
+/**
+ * Return the human-readable identity of a Slack message. Block Kit attachment
+ * messages can have an empty top-level `text`, so thread consumers must fall
+ * back to attachment fallback/blocks instead of losing the parent finding.
+ */
+export function slackMessageText(message = {}) {
+  const topLevel = String(message.text || '').trim();
+  if (topLevel) return topLevel;
+
+  for (const attachment of message.attachments || []) {
+    const fallback = String(attachment?.fallback || '').trim();
+    if (fallback) return fallback;
+    const attachmentText = (attachment?.blocks || [])
+      .map(slackBlockText)
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    if (attachmentText) return attachmentText;
+  }
+
+  const blockText = (message.blocks || [])
+    .map(slackBlockText)
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  if (blockText) return blockText;
+  if ((message.files || []).length > 0) return '(media)';
+  return '';
+}
+
+/**
+ * Keep the thread parent (the authoritative task/finding identity) plus the
+ * newest replies that fit in the context budget. Slack returns the parent as
+ * the first item from conversations.replies.
+ */
+export function slackThreadContextMessages(messages = [], currentTs = '', limit = 10) {
+  const boundedLimit = Math.max(0, Number.parseInt(limit, 10) || 0);
+  if (boundedLimit === 0) return [];
+
+  const candidates = messages.filter(message => message?.ts !== currentTs);
+  if (candidates.length <= boundedLimit) return candidates;
+
+  const parent = candidates[0];
+  if (boundedLimit === 1) return [parent];
+  return [parent, ...candidates.slice(-(boundedLimit - 1))];
+}
+
 /**
  * Get user info (display name).
  */

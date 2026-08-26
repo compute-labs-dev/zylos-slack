@@ -5,6 +5,13 @@
 - Retire the Compute Labs background Codex monitor profile. It now defaults to
   disabled and mention-only so ordinary channel conversation cannot launch a
   triage run or receive an automated reply.
+- Preserve the exact finding identity for Slack thread replies by reading the
+  parent message's top-level text, attachment fallback, or Block Kit text.
+- Make thread context authoritative for read-only triage so a reply cannot
+  borrow an unrelated foreground task when the user's message is brief.
+- Make ephemeral triage tool-free and ignore ambient Codex config/rules. Also
+  remove Slack, GitHub, Jira, and provider credentials from its environment;
+  it uses isolated HOME/CODEX_HOME directories that expose only its Codex auth.
 
 ## 0.1.2 (2026-05-28)
 

@@ -12,7 +12,8 @@ import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './li
 import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
-  fetchHistory, fetchThread, sendLongMessage, sendText,
+  fetchHistory, fetchThread, sendLongMessage, sendText, slackMessageText,
+  slackThreadContextMessages,
 } from './lib/message.js';
 import { claimEvent, pruneEvents } from './lib/dedup-store.js';
 import {
@@ -347,13 +348,14 @@ async function handleDM(event) {
   let threadContext = '';
   if (event.thread_ts && event.thread_ts !== event.ts) {
     try {
-      const replies = await fetchThread(event.channel, event.thread_ts, 5);
+      const replies = await fetchThread(event.channel, event.thread_ts, 6, {
+        includeParent: true,
+      });
       if (replies.length > 0) {
         const lines = [];
-        for (const r of replies) {
-          if (r.ts === event.ts) continue;
+        for (const r of slackThreadContextMessages(replies, event.ts, 5)) {
           const rName = r.user ? await getUserName(r.user) : 'bot';
-          lines.push(`${rName}: ${r.text || '(media)'}`);
+          lines.push(`${rName}: ${slackMessageText(r) || '(empty message)'}`);
         }
         if (lines.length > 0) {
           threadContext = `<thread-context>\n${lines.join('\n')}\n</thread-context>\n\n`;
@@ -459,12 +461,11 @@ async function handleGroupMessage(event, isMention = false) {
         includeParent: true,
       });
       const resolved = [];
-      for (const reply of replies) {
-        if (reply.ts === event.ts) continue;
+      for (const reply of slackThreadContextMessages(replies, event.ts, contextLimit)) {
         const from = reply.user ? await getUserName(reply.user) : 'bot';
-        resolved.push({ from, text: reply.text || '(media)', ts: reply.ts });
+        resolved.push({ from, text: slackMessageText(reply) || '(empty message)', ts: reply.ts });
       }
-      contextMsgs = resolved.slice(-contextLimit);
+      contextMsgs = resolved;
     } catch (error) {
       console.warn(`[slack] Failed to fetch group thread context: ${error.message}`);
     }
@@ -494,6 +495,9 @@ async function handleGroupMessage(event, isMention = false) {
     smartHint = '\n(You were directly @mentioned — you MUST reply. Do not respond with [SKIP].)';
   } else if (isSmartNoMention) {
     smartHint = '\n(No @mention. Read the message and decide: reply only if you can genuinely help, otherwise reply with exactly [SKIP].)';
+  }
+  if (event.thread_ts) {
+    smartHint += `\n(This reply belongs to Slack thread ${event.thread_ts}. The supplied thread context is authoritative for this response. Never fill missing context from another active task, PR, worktree, or session. If the thread does not identify one task or issue clearly, ask for its link instead of inferring.)`;
   }
 
   const attachmentBlock = fileLine
