@@ -6,6 +6,7 @@ import {
   postReviewFindingActionThreadReply,
   respondToAction,
   resolveReviewFindingWorkflowBin,
+  reviewFindingActionThreadReplyResponse,
   reviewFindingActionThreadTarget,
 } from '../src/lib/review-finding-actions.js';
 
@@ -57,6 +58,61 @@ test('postReviewFindingActionThreadReply appends success text in the card thread
     { thread_ts: '1780000000.000100' },
   ]]);
   assert.deepEqual(result, { ok: true, ts: '1780000001.000200' });
+});
+
+test('postReviewFindingActionThreadReply accepts workflow slackThreadReply results', async () => {
+  const calls = [];
+  await postReviewFindingActionThreadReply({
+    channel: { id: 'C123' },
+    message: { ts: '1780000000.000100' },
+  }, {
+    text: 'Recorded rejected on the GitHub issue.',
+    policy: 'append-thread-reply-preserve-card',
+    sent: false,
+  }, async (...args) => {
+    calls.push(args);
+    return { ok: true };
+  });
+
+  assert.deepEqual(calls, [[
+    'C123',
+    'Recorded rejected on the GitHub issue.',
+    { thread_ts: '1780000000.000100' },
+  ]]);
+});
+
+test('reviewFindingActionThreadReplyResponse skips replies already sent by workflow', () => {
+  assert.equal(reviewFindingActionThreadReplyResponse({
+    slackThreadReply: {
+      text: 'Decision recorded: APPROVED',
+      sent: true,
+    },
+  }, {
+    action_id: 'review_finding_approve',
+  }), null);
+});
+
+test('reviewFindingActionThreadReplyResponse returns unsent workflow thread replies', () => {
+  assert.deepEqual(reviewFindingActionThreadReplyResponse({
+    slackThreadReply: {
+      text: 'Decision recorded: REJECTED',
+      sent: false,
+    },
+  }, {
+    action_id: 'review_finding_reject',
+  }), {
+    text: 'Decision recorded: REJECTED',
+    sent: false,
+  });
+});
+
+test('reviewFindingActionThreadReplyResponse keeps default fallback for old workflows', () => {
+  assert.deepEqual(reviewFindingActionThreadReplyResponse({}, {
+    action_id: 'review_finding_redirect',
+  }), {
+    response_type: 'ephemeral',
+    text: 'Recorded redirect for the review finding.',
+  });
 });
 
 test('reviewFindingActionThreadTarget handles attachment containers', () => {
