@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.4 (2026-08-26)
+
+- Add the hourglass reaction immediately after access and empty-message checks,
+  before user lookup, attachment download, or thread-context requests, so slow
+  optional Slack I/O cannot make the agent appear offline.
+- Keep the thread parent and authoritative thread-only response contract from
+  0.1.3 available to every deployed Compute Labs Slack agent.
+
 - Retire the Compute Labs background Codex monitor profile. It now defaults to
   disabled and mention-only so ordinary channel conversation cannot launch a
   triage run or receive an automated reply.
