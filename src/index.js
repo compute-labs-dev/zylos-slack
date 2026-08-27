@@ -294,27 +294,37 @@ function execFileAsync(file, args, options) {
 
 async function handleDM(event) {
   const userId = event.user;
-  const userName = await getUserName(userId);
-
-  // Owner auto-binding
-  if (!config.owner.bound) {
-    config.owner = { bound: true, user_id: userId, name: userName };
-    saveConfig(config);
-    console.log(`[slack] Owner bound: ${userName} (${userId})`);
-  }
-
-  const isOwner = userId === config.owner.user_id;
+  const ownerUnbound = !config.owner.bound;
+  const isOwner = ownerUnbound || userId === config.owner.user_id;
 
   // Access check
   if (!isOwner) {
     if (config.dmPolicy === 'owner') {
-      console.log(`[slack] DM rejected (owner-only): ${userName}`);
+      console.log(`[slack] DM rejected (owner-only): ${userId}`);
       return;
     }
     if (config.dmPolicy === 'allowlist' && !config.dmAllowFrom.includes(userId)) {
-      console.log(`[slack] DM rejected (not in allowlist): ${userName}`);
+      console.log(`[slack] DM rejected (not in allowlist): ${userId}`);
       return;
     }
+  }
+
+  const text = event.text || '';
+  if (!text.trim() && !(event.files?.length > 0)) return;
+
+  // Acknowledge as soon as the message is accepted. User/profile lookup,
+  // attachment download, and thread hydration are optional context I/O and
+  // must never delay the visible "working" signal.
+  await addReaction(event.channel, event.ts, 'hourglass_flowing_sand');
+  trackTyping(event.channel, event.ts);
+
+  const userName = await getUserName(userId);
+
+  // Owner auto-binding
+  if (ownerUnbound) {
+    config.owner = { bound: true, user_id: userId, name: userName };
+    saveConfig(config);
+    console.log(`[slack] Owner bound: ${userName} (${userId})`);
   }
 
   // Build message content
@@ -341,9 +351,11 @@ async function handleDM(event) {
   }
 
   // Text content
-  const text = event.text || '';
   if (text) content += text;
-  if (!content.trim()) return;
+  if (!content.trim()) {
+    await removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
+    return;
+  }
 
   // Thread context
   let threadContext = '';
@@ -366,10 +378,6 @@ async function handleDM(event) {
       console.warn('[slack] Failed to fetch thread context:', err.message);
     }
   }
-
-  // Add typing indicator
-  await addReaction(event.channel, event.ts, 'hourglass_flowing_sand');
-  trackTyping(event.channel, event.ts);
 
   // Build endpoint
   const endpoint = buildEndpoint(event.channel, 'dm', event.ts, event.thread_ts);
@@ -396,7 +404,6 @@ async function handleDM(event) {
 async function handleGroupMessage(event, isMention = false) {
   const channelId = event.channel;
   const userId = event.user;
-  const userName = await getUserName(userId);
   const isOwner = userId === config.owner?.user_id;
 
   // Check group policy
@@ -424,6 +431,18 @@ async function handleGroupMessage(event, isMention = false) {
   // Smart mode: receive all but flag non-mentions
   const isSmartNoMention = mode === 'smart' && !isMention;
 
+  const text = (event.text || '').replace(/<@[A-Z0-9]+>/g, '').trim(); // strip @mentions
+  if (!text && !(event.files?.length > 0)) return;
+
+  // Typing indicator (only for messages that require a response). Do this
+  // before user/profile lookup, attachment download, or thread hydration.
+  if (isMention || !isSmartNoMention) {
+    await addReaction(event.channel, event.ts, 'hourglass_flowing_sand');
+    trackTyping(event.channel, event.ts);
+  }
+
+  const userName = await getUserName(userId);
+
   // Build message content
   let content = '';
   let fileLine = '';
@@ -437,13 +456,18 @@ async function handleGroupMessage(event, isMention = false) {
         fileLine += `\n---- file: ${localPath}`;
       } catch (err) {
         console.warn('[slack] File download failed:', err.message);
+        content += `[file: ${file.name} (download failed)]\n`;
       }
     }
   }
 
-  const text = (event.text || '').replace(/<@[A-Z0-9]+>/g, '').trim(); // strip @mentions
   if (text) content += text;
-  if (!content.trim() && !fileLine) return;
+  if (!content.trim() && !fileLine) {
+    if (isMention || !isSmartNoMention) {
+      await removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
+    }
+    return;
+  }
 
   // Record in history
   const historyKey = event.thread_ts || channelId;
@@ -475,12 +499,6 @@ async function handleGroupMessage(event, isMention = false) {
   if (contextMsgs.length > 0) {
     const lines = contextMsgs.map(m => `${m.from}: ${m.text}`);
     groupContext = `<group-context>\n${lines.join('\n')}\n</group-context>\n\n`;
-  }
-
-  // Typing indicator (only for mentions or smart with mention)
-  if (isMention || !isSmartNoMention) {
-    await addReaction(event.channel, event.ts, 'hourglass_flowing_sand');
-    trackTyping(event.channel, event.ts);
   }
 
   // Build endpoint
