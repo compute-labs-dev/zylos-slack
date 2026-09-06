@@ -5,6 +5,7 @@ export const REVIEW_FINDING_ACTION_IDS = new Set([
   'review_finding_approve',
   'review_finding_reject',
   'review_finding_redirect',
+  'review_finding_defer',
 ]);
 
 export function resolveReviewFindingWorkflowBin({
@@ -60,6 +61,10 @@ export async function postReviewFindingActionThreadReply(body, response, sendTex
 
 export function reviewFindingActionThreadReplyResponse(result, action) {
   if (result?.slackThreadReply?.sent === true) return null;
+  if (result?.decision?.disposition && result?.decision?.nextAction) {
+    return { response_type: 'ephemeral',
+      text: `Recorded ${result.decision.disposition.replaceAll('_', ' ')}. ${result.decision.nextAction}` };
+  }
   return result?.slackThreadReply || result?.slackResponse || {
     response_type: 'ephemeral',
     text: `Recorded ${action.action_id.replace('review_finding_', '')} for the review finding.`,

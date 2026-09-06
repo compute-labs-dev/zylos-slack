@@ -27,6 +27,10 @@ import {
   resolveReviewFindingWorkflowBin,
   reviewFindingActionThreadReplyResponse,
 } from './lib/review-finding-actions.js';
+import {
+  recordReviewFindingAdmission,
+  reviewFindingAdmissionSettings,
+} from './lib/review-finding-admission.js';
 
 // ── Constants ──
 
@@ -51,6 +55,7 @@ let config = null;
 let app = null;
 let receiverSettings = null;
 let receiverQueue = null;
+let reviewFindingAdmission = null;
 
 // ── Startup ──
 
@@ -58,6 +63,17 @@ console.log('[slack] Starting...');
 console.log('[slack] Data directory:', DATA_DIR);
 
 config = getConfig();
+try {
+  reviewFindingAdmission = reviewFindingAdmissionSettings({
+    env: process.env,
+    config,
+    dataDir: DATA_DIR,
+    connectionMode: config.connection_mode,
+  });
+} catch (error) {
+  console.error(`[slack] Invalid review finding admission configuration: ${error.message}`);
+  process.exit(1);
+}
 
 try {
   receiverSettings = receiverSettingsFromEnv();
@@ -234,7 +250,16 @@ async function handleReviewFindingAction({ ack, body, respond }) {
   }
 
   try {
-    const result = await runReviewFindingWorkflowAction(body);
+    const admission = reviewFindingAdmission.enabled
+      ? recordReviewFindingAdmission({
+          directory: reviewFindingAdmission.directory,
+          payload: body,
+          action,
+          policyVersion: reviewFindingAdmission.policyVersion,
+          connectionMode: config.connection_mode,
+        })
+      : null;
+    const result = await runReviewFindingWorkflowAction(body, { admissionId: admission?.id });
     const threadReply = reviewFindingActionThreadReplyResponse(result, action);
     if (threadReply) {
       await postReviewFindingActionThreadReply(body, threadReply, sendText);
@@ -249,7 +274,7 @@ async function handleReviewFindingAction({ ack, body, respond }) {
   }
 }
 
-async function runReviewFindingWorkflowAction(payload) {
+async function runReviewFindingWorkflowAction(payload, { admissionId } = {}) {
   const payloadFile = path.join(
     REVIEW_FINDING_ACTION_DIR,
     `${Date.now()}-${Math.random().toString(36).slice(2)}.json`
@@ -264,6 +289,7 @@ async function runReviewFindingWorkflowAction(payload) {
     '--payload-file',
     payloadFile,
   ];
+  if (admissionId) args.push('--admission-id', admissionId);
 
   const stdout = await execFileAsync(REVIEW_FINDING_WORKFLOW_BIN, args, {
     encoding: 'utf8',
