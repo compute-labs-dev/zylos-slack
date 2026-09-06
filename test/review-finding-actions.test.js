@@ -137,3 +137,11 @@ test('resolveReviewFindingWorkflowBin prefers explicit env override', () => {
     existsSync: candidate => candidate === explicit,
   }), explicit);
 });
+
+test('decision thread reply includes its useful next action and preserves rejection semantics', () => {
+  const nextAction = 'Finding owner: revisit when a new staging trace is attached.';
+  const reply = reviewFindingActionThreadReplyResponse({ decision: { disposition: 'valid_deferred', nextAction } }, { action_id: 'review_finding_defer' });
+  assert.equal(reply.text, `Recorded valid deferred. ${nextAction}`);
+  assert.doesNotMatch(reviewFindingActionThreadReplyResponse({ decision: { disposition: 'rejected', nextAction: 'Record a specific reason if known.' } },
+    { action_id: 'review_finding_reject' }).text, /false positive/i);
+});
