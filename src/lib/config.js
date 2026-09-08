@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG = {
 
   groupPolicy: 'allowlist',       // 'open' | 'allowlist' | 'disabled'
   groups: {},                      // per-channel config: { C0123: { name, mode, allowFrom, historyLimit } }
+  peerBotUserIds: [],             // ignore messages addressed only to these other bots
 
   message: {
     context_messages: 10,

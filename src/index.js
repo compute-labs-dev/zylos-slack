@@ -10,6 +10,7 @@ dotenv.config({ path: path.join(process.env.HOME, 'zylos/.env') });
 
 import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './lib/config.js';
 import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
+import { classifyGroupMessage, isExplicitMention } from './lib/group-routing.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
   fetchHistory, fetchThread, sendLongMessage, sendText, slackMessageText,
@@ -114,15 +115,6 @@ if (receiverSettings) {
     { maxQueue: receiverSettings.maxQueue },
   );
   console.log(`[slack] External receiver enabled: ${receiverSettings.command}`);
-}
-
-// Matches an explicit @mention of the bot, tolerating Slack's optional
-// `<@U123|displayname>` piped form. Used by BOTH the message and app_mention
-// handlers so their detection can never drift apart — divergence would silently
-// break the shared-dedup exactly-once guarantee.
-function isExplicitMention(text, botId) {
-  if (!botId || !text) return false;
-  return new RegExp(`<@${botId}(\\|[^>]+)?>`).test(text);
 }
 
 // ── Main ──
@@ -430,34 +422,16 @@ async function handleDM(event) {
 async function handleGroupMessage(event, isMention = false) {
   const channelId = event.channel;
   const userId = event.user;
-  const isOwner = userId === config.owner?.user_id;
-
-  // Check group policy
-  if (config.groupPolicy === 'disabled' && !isOwner) {
-    return;
-  }
-
+  const route = classifyGroupMessage({ config, event, botUserId: getBotUserId() });
+  if (route === 'ignore') return;
+  isMention = route === 'mention';
   const groupConfig = config.groups?.[channelId];
-
-  if (config.groupPolicy === 'allowlist') {
-    if (!groupConfig && !isOwner) return;
-  }
-
-  // Per-group sender check
-  if (groupConfig?.allowFrom?.length > 0 && !isOwner) {
-    if (!groupConfig.allowFrom.includes(userId)) return;
-  }
-
-  const mode = groupConfig?.mode || 'mention';
   const groupName = groupConfig?.name || channelId;
-
-  // In mention mode, only respond to @mentions
-  if (mode === 'mention' && !isMention && !isOwner) return;
-
   // Smart mode: receive all but flag non-mentions
-  const isSmartNoMention = mode === 'smart' && !isMention;
+  const isSmartNoMention = route === 'smart';
 
-  const text = (event.text || '').replace(/<@[A-Z0-9]+>/g, '').trim(); // strip @mentions
+  // Keep addressing intact so task context identifies the intended recipient.
+  const text = (event.text || '').trim();
   if (!text && !(event.files?.length > 0)) return;
 
   // Typing indicator (only for messages that require a response). Do this

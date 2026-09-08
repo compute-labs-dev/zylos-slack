@@ -92,6 +92,26 @@ reference in
 [`examples/computelabs-codex-monitor`](examples/computelabs-codex-monitor/README.md).
 Do not deploy it as a background listener.
 
+## Channel ownership
+
+Channel admission applies to every sender, including the configured owner.
+An owner cannot bypass disabled groups, channel or sender allowlists, or the
+explicit bot mention required by `mention` mode. Previous participation in a
+thread does not count as a new mention. DM and workflow-action permissions use
+their existing policies.
+
+Use `smart` mode only for a channel this bot owns for ordinary conversation.
+When multiple bots share a workspace, configure `peerBotUserIds` with the other
+bots' verified Slack user IDs. Messages addressed only to one of those peers
+are ignored before reactions, context reads or agent dispatch. An explicit
+mention of this bot still permits an otherwise authorized message. Human
+mentions and the original addressing text remain available in task context.
+
+For the Compute Labs pair, SWE owns `C0B7EKUAK33` feedback intake and lists
+Reviewer user `U0B7QTWJA8L` as its peer; Reviewer accepts explicit mentions only
+inside its configured review channel and lists SWE user `U0B7K6V2LTG` as its
+peer. Routing does not itself grant workflow approval authority.
+
 ## License
 
 MIT
