@@ -40,8 +40,8 @@ CODEX_TRIAGE_BIN=/absolute/path/to/node
 CODEX_TRIAGE_ARGS_JSON='["/absolute/path/to/codex.js"]'
 CODEX_TRIAGE_ROOT=/Users/xingfanxia/projects/work/cl/financing-platform/cl-backend-monorepo
 CODEX_TRIAGE_CONTEXT_FILE=/Users/xingfanxia/projects/work/cl/SLACK-CODEX-MONITOR.md
-CODEX_TRIAGE_MODEL=gpt-5.6-sol
-CODEX_TRIAGE_REASONING=xhigh
+CODEX_TRIAGE_MODEL=gpt-6-sol
+CODEX_TRIAGE_REASONING=medium
 ```
 
 Use absolute paths for Node and pass both JavaScript entrypoints as JSON-array
@@ -82,3 +82,7 @@ the diagnostic ends.
 - Interactive sessions fetch only task-relevant Slack context when development
   work needs current feedback.
 - No Slack message body is written to local component logs.
+
+The default Sol/medium choice is supported by the [September 22 synthetic CLI
+comparison](model-evaluation-20260922.md). This changes only the bounded receiver;
+broad engineering agents retain their own configuration.

@@ -79,8 +79,8 @@ function settings(env = process.env) {
     ),
     binary: env.CODEX_TRIAGE_BIN || 'codex',
     binaryArgs,
-    model: env.CODEX_TRIAGE_MODEL || 'gpt-5.6-sol',
-    reasoning: env.CODEX_TRIAGE_REASONING || 'xhigh',
+    model: env.CODEX_TRIAGE_MODEL || 'gpt-6-sol',
+    reasoning: env.CODEX_TRIAGE_REASONING || 'medium',
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS,
     operatorContext,
   };

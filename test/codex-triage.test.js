@@ -35,6 +35,18 @@ test('triage disables tools and ignores ambient Codex config and rules', async (
   assert.deepEqual(args.slice(args.indexOf('--disable'), args.indexOf('--disable') + 2), ['--disable', 'shell_tool']);
   assert.deepEqual(args.slice(args.indexOf('--sandbox'), args.indexOf('--sandbox') + 2), ['--sandbox', 'read-only']);
   assert.ok(args.includes('approval_policy="never"'));
+  assert.equal(args[args.indexOf('--model') + 1], 'gpt-6-sol');
+  assert.ok(args.includes('model_reasoning_effort="medium"'));
+});
+
+test('triage preserves an explicitly selected model and effort', () => {
+  const config = settings({
+    CODEX_TRIAGE_ROOT: process.cwd(),
+    CODEX_TRIAGE_MODEL: 'gpt-6-astra',
+    CODEX_TRIAGE_REASONING: 'high',
+  });
+  assert.equal(config.model, 'gpt-6-astra');
+  assert.equal(config.reasoning, 'high');
 });
 
 test('triage rejects malformed command arguments', () => {
