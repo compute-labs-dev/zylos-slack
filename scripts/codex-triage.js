@@ -79,6 +79,7 @@ function settings(env = process.env) {
     ),
     binary: env.CODEX_TRIAGE_BIN || 'codex',
     binaryArgs,
+    openaiBaseUrl: env.CODEX_TRIAGE_OPENAI_BASE_URL || '',
     model: env.CODEX_TRIAGE_MODEL || 'gpt-6-sol',
     reasoning: env.CODEX_TRIAGE_REASONING || 'medium',
     timeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS,
@@ -144,6 +145,11 @@ function runCodex(config, prompt) {
     const args = [
       ...config.binaryArgs,
       'exec',
+      // Keep provider overrides with exec's other --config arguments. Codex
+      // 0.155.1 drops root-level overrides when exec also has --config flags.
+      ...(config.openaiBaseUrl
+        ? ['--config', `openai_base_url=${JSON.stringify(config.openaiBaseUrl)}`]
+        : []),
       '--ephemeral',
       '--ignore-user-config',
       '--ignore-rules',

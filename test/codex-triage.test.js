@@ -37,6 +37,7 @@ test('triage disables tools and ignores ambient Codex config and rules', async (
   assert.ok(args.includes('approval_policy="never"'));
   assert.equal(args[args.indexOf('--model') + 1], 'gpt-6-sol');
   assert.ok(args.includes('model_reasoning_effort="medium"'));
+  assert.ok(!args.some(arg => arg.startsWith('openai_base_url=')));
 });
 
 test('triage preserves an explicitly selected model and effort', () => {
@@ -47,6 +48,29 @@ test('triage preserves an explicitly selected model and effort', () => {
   });
   assert.equal(config.model, 'gpt-6-astra');
   assert.equal(config.reasoning, 'high');
+});
+
+test('triage applies the provider URL after exec while preserving Node launcher arguments', async () => {
+  const baseUrl = 'https://ax-useast-resource.services.ai.azure.com/openai/v1';
+  const config = settings({
+    CODEX_TRIAGE_ROOT: process.cwd(),
+    CODEX_TRIAGE_BIN: process.execPath,
+    CODEX_TRIAGE_ARGS_JSON: JSON.stringify([
+      '-e',
+      "process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(JSON.stringify(process.argv.slice(1))))",
+    ]),
+    CODEX_TRIAGE_OPENAI_BASE_URL: baseUrl,
+  });
+
+  assert.equal(config.openaiBaseUrl, baseUrl);
+  const args = JSON.parse(await runCodex(config, 'test prompt'));
+  assert.deepEqual(args.slice(0, 3), ['exec', '--config', `openai_base_url=${JSON.stringify(baseUrl)}`]);
+  assert.ok(args.indexOf('approval_policy="never"') > 2);
+  assert.ok(args.includes('--ephemeral'));
+  assert.ok(args.includes('--ignore-user-config'));
+  assert.ok(args.includes('--ignore-rules'));
+  assert.deepEqual(args.slice(args.indexOf('--disable'), args.indexOf('--disable') + 2), ['--disable', 'shell_tool']);
+  assert.deepEqual(args.slice(args.indexOf('--sandbox'), args.indexOf('--sandbox') + 2), ['--sandbox', 'read-only']);
 });
 
 test('triage rejects malformed command arguments', () => {
