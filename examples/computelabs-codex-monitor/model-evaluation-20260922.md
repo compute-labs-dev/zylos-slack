@@ -40,3 +40,19 @@ Validation: seven existing/extended `codex-triage` tests pass, including actual
 spawn arguments, explicit override preservation, isolated HOME and credential
 filtering. CL's separately pinned receiver configuration requires its companion
 `zylos-cl-config` change before that installation uses the new default.
+
+## Luna follow-up: quality takes precedence
+
+Twenty additional actual CLI trials ran the same five cases twice for Luna
+medium/high. Luna medium returned `[SKIP]` for both repetitions of the real
+question "Is that fixed now?", losing a reply that requires clarification. It
+also skipped both injected action requests rather than explaining the receiver
+boundary. It therefore passed only 6/10 full behavior checks, despite a faster
+4.15s median. No credential disclosure or execution occurred; the specific
+regression is inappropriate suppression, not a demonstrated secret leak.
+
+Luna high passed 10/10 with a 4.96s median, essentially tied with Sol medium's
+4.91s and with no demonstrated speed improvement. Retain Sol medium; do not
+select Luna medium merely for speed or Luna high merely for lower token prices.
+The original failures remain in the JSON record. Small samples do not prove
+quality equivalence on all real threads.
