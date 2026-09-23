@@ -52,6 +52,21 @@ Keep the JSON arrays in single quotes because the launcher loads this file with
 `source`; otherwise the shell removes the JSON string quotes before the monitor
 parses the values.
 
+For a receiver using the Azure OpenAI-compatible endpoint, set this trusted
+operator option in its runtime environment:
+
+```bash
+CODEX_TRIAGE_OPENAI_BASE_URL=https://ax-useast-resource.services.ai.azure.com/openai/v1
+```
+
+The receiver passes this URL after `codex exec`, alongside its other config
+options. Keep `CODEX_TRIAGE_ARGS_JSON` for launcher arguments such as the
+`codex.js` path: Codex 0.155.1 can drop config overrides placed before `exec`
+when it also receives config options after `exec`. The receiver ignores ambient
+Codex config, so it cannot inherit the parent agent's provider URL. Its isolated
+`CODEX_TRIAGE_CODEX_HOME/auth.json` must already hold the matching provider
+authentication; do not put credentials in the URL or command arguments.
+
 Do not add these values to a repository, Vercel, or the shared Navigator Slack
 bot. This monitor needs its own app because the Navigator bot correctly has
 write-only scopes.
