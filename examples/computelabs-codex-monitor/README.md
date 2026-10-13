@@ -111,5 +111,5 @@ an unexpected failure. Setting `enabled` to `false` causes a clean stop.
 - Replaying the same Slack event produces no second run or reply.
 - Expired, malformed, cross-channel, and path-like registry values fail closed.
 - The generated Codex command contains `--ephemeral --sandbox read-only` and
-  `approval_policy="untrusted"`.
+  `approval_policy="never"`.
 - No Slack message content appears in the task-thread or receiver-dedup stores.

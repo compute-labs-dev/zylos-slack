@@ -113,7 +113,7 @@ function runCodex(config, prompt) {
       'exec',
       '--ephemeral',
       '--sandbox', 'read-only',
-      '--config', 'approval_policy="untrusted"',
+      '--config', 'approval_policy="never"',
       '--model', config.model,
       '--config', `model_reasoning_effort=${JSON.stringify(config.reasoning)}`,
       '--cd', config.root,
