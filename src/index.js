@@ -429,6 +429,8 @@ async function handleGroupMessage(event, isMention = false) {
   const groupName = groupConfig?.name || channelId;
   // Smart mode: receive all but flag non-mentions
   const isSmartNoMention = route === 'smart';
+  // Observe mode: record non-mentions as context only; never dispatch them.
+  const isObserveOnly = route === 'observe';
 
   // Keep addressing intact so task context identifies the intended recipient.
   const text = (event.text || '').trim();
@@ -436,7 +438,7 @@ async function handleGroupMessage(event, isMention = false) {
 
   // Typing indicator (only for messages that require a response). Do this
   // before user/profile lookup, attachment download, or thread hydration.
-  if (isMention || !isSmartNoMention) {
+  if (isMention) {
     await addReaction(event.channel, event.ts, 'hourglass_flowing_sand');
     trackTyping(event.channel, event.ts);
   }
@@ -449,6 +451,10 @@ async function handleGroupMessage(event, isMention = false) {
 
   if (event.files && event.files.length > 0) {
     for (const file of event.files) {
+      if (isObserveOnly) {
+        content += `[file: ${file.name}]\n`;
+        continue;
+      }
       try {
         const localPath = await downloadFile(file.url_private_download, file.name);
         const isImage = file.mimetype?.startsWith('image/');
@@ -463,7 +469,7 @@ async function handleGroupMessage(event, isMention = false) {
 
   if (text) content += text;
   if (!content.trim() && !fileLine) {
-    if (isMention || !isSmartNoMention) {
+    if (isMention) {
       await removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
     }
     return;
@@ -476,6 +482,11 @@ async function handleGroupMessage(event, isMention = false) {
   history.push({ from: userName, text: content.substring(0, 500), ts: event.ts });
   const maxHistory = (groupConfig?.historyLimit || config.message.context_messages) * 2;
   if (history.length > maxHistory) history.splice(0, history.length - maxHistory);
+
+  if (isObserveOnly) {
+    logMessage(channelId, { from: userName, userId, text: content, ts: event.ts });
+    return;
+  }
 
   // Build group context
   const contextLimit = groupConfig?.historyLimit || config.message.context_messages;
@@ -527,7 +538,7 @@ async function handleGroupMessage(event, isMention = false) {
 
   const eventKey = event.client_msg_id || `${event.channel}-${event.ts}`;
   sendToAgent('slack', endpoint, c4Message, eventKey, (rejectMsg) => {
-    if (isMention || !isSmartNoMention) {
+    if (isMention) {
       removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
     }
     console.warn(`[slack] Agent receiver rejected group msg from ${userName}: ${rejectMsg}`);

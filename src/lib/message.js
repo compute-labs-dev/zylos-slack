@@ -191,18 +191,42 @@ export async function fetchHistory(channel, limit = 10, latest) {
   return (res.messages || []).reverse(); // oldest first
 }
 
+const THREAD_PAGE_SIZE = 200;
+const THREAD_MAX_PAGES = 5;
+
 /**
- * Fetch thread replies.
+ * Fetch the newest `limit` replies of a thread (oldest first), optionally
+ * preceded by the parent. conversations.replies pages oldest-first, so read
+ * every page (bounded) and keep only the tail; a single page would return the
+ * oldest replies and hide the newest ones in long threads.
  */
-export async function fetchThread(channel, threadTs, limit = 10, { includeParent = false } = {}) {
+export async function fetchThread(channel, threadTs, limit = 10, {
+  includeParent = false,
+  maxPages = THREAD_MAX_PAGES,
+} = {}) {
   const client = getClient();
-  const res = await client.conversations.replies({
-    channel,
-    ts: threadTs,
-    limit,
-  });
-  const messages = res.messages || [];
-  return includeParent ? messages : messages.slice(1);
+  const keep = Math.max(1, Number.parseInt(limit, 10) || 1);
+  let parent = null;
+  let replies = [];
+  let cursor = '';
+  let pages = 0;
+  do {
+    const params = { channel, ts: threadTs, limit: THREAD_PAGE_SIZE };
+    if (cursor) params.cursor = cursor;
+    const res = await client.conversations.replies(params);
+    pages += 1;
+    for (const message of res.messages || []) {
+      // Slack may repeat the parent at the top of every page.
+      if (message.ts === threadTs) parent ??= message;
+      else replies.push(message);
+    }
+    if (replies.length > keep) replies = replies.slice(-keep);
+    cursor = res.response_metadata?.next_cursor || '';
+  } while (cursor && pages < maxPages);
+  if (cursor) {
+    console.warn(`[slack] Thread ${threadTs} exceeds ${maxPages} reply pages; context uses the newest replies read`);
+  }
+  return includeParent && parent ? [parent, ...replies] : replies;
 }
 
 function slackBlockText(block) {
