@@ -7,6 +7,7 @@
  */
 
 import { getConfig, saveConfig, loadConfig } from './lib/config.js';
+import { GROUP_MODES } from './lib/group-routing.js';
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -27,7 +28,8 @@ Commands:
   remove-dm-allow <user_id>         Remove from DM allowlist
 
   list-groups                       List configured channels
-  add-group <channel_id> <name> [mode]   Add channel (mode: mention|smart)
+  add-group <channel_id> <name> [mode]   Add channel (mode: mention|smart|observe)
+  set-group-mode <channel_id> <mode>     Change channel mode (mention|smart|observe)
   remove-group <channel_id>         Remove channel
   set-group-policy <disabled|allowlist|open>  Set channel access policy
   set-group-allowfrom <channel_id> <id1,id2>  Per-channel sender whitelist
@@ -129,11 +131,11 @@ switch (command) {
     const name = args[2];
     const mode = args[3] || 'mention';
     if (!channelId || !name) {
-      console.error('Usage: add-group <channel_id> <name> [mention|smart]');
+      console.error('Usage: add-group <channel_id> <name> [mention|smart|observe]');
       process.exit(1);
     }
-    if (!['mention', 'smart'].includes(mode)) {
-      console.error('Mode must be "mention" or "smart"');
+    if (!GROUP_MODES.includes(mode)) {
+      console.error(`Mode must be one of: ${GROUP_MODES.join(', ')}`);
       process.exit(1);
     }
     if (!config.groups) config.groups = {};
@@ -160,6 +162,23 @@ switch (command) {
     } else {
       console.log(`Group ${channelId} not found.`);
     }
+    break;
+  }
+
+  case 'set-group-mode': {
+    const channelId = args[1];
+    const mode = args[2];
+    if (!channelId || !GROUP_MODES.includes(mode)) {
+      console.error(`Usage: set-group-mode <channel_id> <${GROUP_MODES.join('|')}>`);
+      process.exit(1);
+    }
+    if (!config.groups?.[channelId]) {
+      console.error(`Group ${channelId} not found.`);
+      process.exit(1);
+    }
+    config.groups[channelId].mode = mode;
+    saveConfig(config);
+    console.log(`Mode for ${channelId} set to ${mode}.`);
     break;
   }
 

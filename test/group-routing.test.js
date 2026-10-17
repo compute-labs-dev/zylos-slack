@@ -122,3 +122,54 @@ test('explicit mention matching accepts Slack piped form and rejects another ide
   assert.equal(isExplicitMention('<@' + REVIEWER + '>', SWE), false);
   assert.equal(isExplicitMention('SWE please verify', SWE), false);
 });
+
+const FP = 'C0AAQ7AL8SD';
+const observeConfig = {
+  ...sweConfig,
+  groups: { [FP]: { mode: 'observe', allowFrom: [], name: 'financing-platform' } },
+};
+const topLevel = { channel: FP, user: AX };
+
+test('observe mode classifies non-mentions as observe and mentions as mention', () => {
+  const classify = (text, user = AX, config = observeConfig) =>
+    classifyGroupMessage({ config, event: { ...topLevel, user, text }, botUserId: SWE });
+  assert.equal(classify('the deploy failed on step 3'), 'observe');
+  assert.equal(classify('<@' + SWE + '> why did it fail?'), 'mention');
+  assert.equal(classify('<@' + REVIEWER + '> please verify'), 'ignore');
+  const restricted = { ...observeConfig, groups: { [FP]: { mode: 'observe', allowFrom: ['UOTHER'] } } };
+  assert.equal(classify('the deploy failed', AX, restricted), 'ignore');
+  assert.equal(classify('<@' + SWE + '> why?', AX, restricted), 'ignore');
+});
+
+test('observe mode records a non-mention without waking the agent', async () => {
+  const h = harness(observeConfig, SWE);
+  await h.handle({ ...topLevel, ts: '1.0', text: 'the deploy failed on step 3', files: [{ name: 'log.txt' }] });
+  assert.deepEqual(h.calls, ['user', 'log'], 'no reaction, download, thread read or dispatch');
+  assert.equal(h.deliveries.length, 0);
+});
+
+test('observe mode records thread replies without a mention and does not dispatch them', async () => {
+  const h = harness(observeConfig, SWE);
+  await h.handle({ ...topLevel, ts: '2.0', thread_ts: threadTs, text: 'still broken' });
+  assert.deepEqual(h.calls, ['user', 'log']);
+});
+
+test('observe mode dispatches a mention with the earlier non-mention as group context', async () => {
+  const h = harness(observeConfig, SWE);
+  await h.handle({ ...topLevel, ts: '1.0', text: 'the deploy failed on step 3' });
+  await h.handle({ ...topLevel, ts: '2.0', text: '<@' + SWE + '> why did that fail?' }, true);
+  assert.equal(h.deliveries.length, 1);
+  const message = h.deliveries[0][2];
+  assert.match(message, /<group-context>\nAX: the deploy failed on step 3\n<\/group-context>/);
+  assert.ok(message.includes('you MUST reply'));
+  assert.equal(h.calls.filter(call => call === 'reaction').length, 1);
+});
+
+test('observe mode ignores a disallowed sender entirely', async () => {
+  const config = { ...observeConfig, groups: { [FP]: { mode: 'observe', allowFrom: ['UOTHER'] } } };
+  const h = harness(config, SWE);
+  await h.handle({ ...topLevel, ts: '1.0', text: 'context from an outsider' });
+  await h.handle({ ...topLevel, ts: '2.0', text: '<@' + SWE + '> answer me' }, true);
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.deliveries.length, 0);
+});

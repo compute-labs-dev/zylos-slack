@@ -10,7 +10,9 @@ Slack communication channel for [Zylos](https://github.com/zylos-ai).
 - Thread-aware replies
 - File/image upload and download
 - Access control (DM policy + per-channel allowlists)
-- Smart mode (receive all channel messages) and mention mode
+- Channel modes: `mention` (explicit @mentions only), `smart` (every allowed
+  message wakes the agent) and `observe` (every allowed message is kept as
+  context; only explicit @mentions wake the agent)
 - Markdown formatting via Slack blocks
 - Typing indicators
 - Admin CLI for runtime configuration
@@ -101,6 +103,16 @@ thread does not count as a new mention. DM and workflow-action permissions use
 their existing policies.
 
 Use `smart` mode only for a channel this bot owns for ordinary conversation.
+Use `observe` mode when the bot should answer only explicit @mentions but still
+see the surrounding conversation: allowed non-mention messages, including
+thread replies, are recorded in the channel/thread history (in memory, so a
+restart clears it) and logged, without a reaction, attachment download or
+agent dispatch. An @mention is then dispatched like a `smart` message, with
+that history as `<group-context>`; a thread mention also reads the thread from
+Slack. `allowFrom` and `peerBotUserIds` apply as in the other modes.
+
+Thread context holds the parent plus the newest replies. Replies are read in
+pages of 200, up to 5 pages; beyond that the newest replies read are used.
 When multiple bots share a workspace, configure `peerBotUserIds` with the other
 bots' verified Slack user IDs. Messages addressed only to one of those peers
 are ignored before reactions, context reads or agent dispatch. An explicit

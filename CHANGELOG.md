@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 0.1.5 (2026-10-17)
+
+- Fix: thread context showed only the oldest replies. `fetchThread` now pages
+  through `conversations.replies` (200 per page, at most 5 pages) and keeps the
+  parent plus the newest replies, so long threads reach the agent with their
+  latest messages.
+- Add `observe` channel mode: allowed non-mention messages are recorded as
+  channel/thread context but never dispatched; explicit @mentions are dispatched
+  with that context. `admin.js add-group` accepts it and the new
+  `set-group-mode` command switches an existing channel.
+
 ## 0.1.4 (2026-08-26)
 
 - Add the hourglass reaction immediately after access and empty-message checks,
