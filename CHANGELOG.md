@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add `:bug:` reports in `observe` channels: an allowed member's `:bug:`
+  reaction on a human top-level message from an allowed member dispatches that
+  message to the agent once (durable claim per message). Needs the
+  `reaction_added` bot event and the `reactions:read` scope.
+
 ## 0.1.5 (2026-10-17)
 
 - Fix: thread context showed only the oldest replies. `fetchThread` now pages

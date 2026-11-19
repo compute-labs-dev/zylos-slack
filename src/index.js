@@ -10,7 +10,7 @@ dotenv.config({ path: path.join(process.env.HOME, 'zylos/.env') });
 
 import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './lib/config.js';
 import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
-import { classifyGroupMessage, isExplicitMention } from './lib/group-routing.js';
+import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention } from './lib/group-routing.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
   fetchHistory, fetchThread, sendLongMessage, sendText, slackMessageText,
@@ -42,6 +42,8 @@ const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const TYPING_DIR = path.join(DATA_DIR, 'typing');
 const REVIEW_FINDING_ACTION_DIR = path.join(DATA_DIR, 'review-finding-actions');
 const RECEIVER_DEDUP_DIR = path.join(DATA_DIR, 'receiver-dedup');
+// One content-free file per reported message, kept so a report starts once.
+const BUG_REPORT_DIR = path.join(DATA_DIR, 'bug-reports');
 const REVIEW_FINDING_WORKFLOW_BIN = resolveReviewFindingWorkflowBin();
 const REVIEW_FINDING_WORKFLOW_COMMAND = process.env.REVIEW_FINDING_WORKFLOW_COMMAND
   || 'computelabs-agent-workflow';
@@ -190,6 +192,9 @@ async function main() {
     console.log(`[slack] app_mention event fired (ts=${event.ts})`);
     await handleGroupMessage(event, true);
   });
+
+  // ── Event: :bug: reaction (needs the reaction_added event and reactions:read) ──
+  app.event('reaction_added', async ({ event }) => handleBugReaction(event));
 
   // Start the app
   await app.start();
@@ -417,20 +422,53 @@ async function handleDM(event) {
   });
 }
 
+// ── Bug Reaction Handler ──
+
+// An internal member's :bug: on a human top-level message in an observe channel
+// hands that message to the agent as a report. It starts once per message:
+// a Slack retry, a second person's :bug: and a remove-and-re-add all claim the
+// same durable key.
+async function handleBugReaction(event) {
+  if (!isBugReaction({ config, event })) return;
+  const { channel, ts } = event.item;
+  let message;
+  try {
+    [message] = await fetchThread(channel, ts, 1, { includeParent: true, maxPages: 1 });
+  } catch (error) {
+    console.warn(`[slack] :bug: message ${ts} could not be read: ${error.message}`);
+    return;
+  }
+  const key = bugReportKey({ config, event, message });
+  if (!key) return;
+  let claimed;
+  try {
+    claimed = claimEvent(BUG_REPORT_DIR, key);
+  } catch (error) {
+    console.error(`[slack] :bug: dedup failed: ${error.message}`);
+    return;
+  }
+  if (!claimed) return;
+  console.log(`[slack] :bug: report (ts=${ts})`);
+  await handleGroupMessage({ ...message, channel }, true, { bugReportBy: event.user });
+}
+
 // ── Group Message Handler ──
 
-async function handleGroupMessage(event, isMention = false) {
+async function handleGroupMessage(event, isMention = false, { bugReportBy = null } = {}) {
   const channelId = event.channel;
   const userId = event.user;
   const route = classifyGroupMessage({ config, event, botUserId: getBotUserId() });
   if (route === 'ignore') return;
-  isMention = route === 'mention';
+  // A :bug: report wakes the agent for a message observe mode only recorded;
+  // one that @mentioned the agent has already reached it.
+  if (bugReportBy && route !== 'observe') return;
+  isMention = route === 'mention' || Boolean(bugReportBy);
   const groupConfig = config.groups?.[channelId];
   const groupName = groupConfig?.name || channelId;
   // Smart mode: receive all but flag non-mentions
   const isSmartNoMention = route === 'smart';
   // Observe mode: record non-mentions as context only; never dispatch them.
-  const isObserveOnly = route === 'observe';
+  const isObserveOnly = route === 'observe' && !bugReportBy;
 
   // Keep addressing intact so task context identifies the intended recipient.
   const text = (event.text || '').trim();
@@ -521,7 +559,9 @@ async function handleGroupMessage(event, isMention = false) {
   // Response directive: a direct @mention is mandatory to answer; a smart-mode
   // non-mention is optional — the agent reads it and decides whether it can help.
   let smartHint = '';
-  if (isMention) {
+  if (bugReportBy) {
+    smartHint = `\n(${await getUserName(bugReportBy)} marked this message :bug: as a bug report for you. Take it in as a report: you MUST reply in its thread. A reaction approves no merge or release.)`;
+  } else if (isMention) {
     smartHint = '\n(You were directly @mentioned — you MUST reply. Do not respond with [SKIP].)';
   } else if (isSmartNoMention) {
     smartHint = '\n(No @mention. Read the message and decide: reply only if you can genuinely help, otherwise reply with exactly [SKIP].)';

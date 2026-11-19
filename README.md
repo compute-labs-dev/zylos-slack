@@ -56,6 +56,8 @@ Slack communication channel for [Zylos](https://github.com/zylos-ai).
    - `message.channels`
    - `message.groups`
    - `app_mention`
+   - `reaction_added` (for `:bug:` reports in `observe` channels; needs
+     `reactions:read`)
 
 ### 4. Configure Environment
 
@@ -110,6 +112,14 @@ restart clears it) and logged, without a reaction, attachment download or
 agent dispatch. An @mention is then dispatched like a `smart` message, with
 that history as `<group-context>`; a thread mention also reads the thread from
 Slack. `allowFrom` and `peerBotUserIds` apply as in the other modes.
+
+In an `observe` channel, a `:bug:` reaction from a member of its `allowFrom`
+on a human top-level message from another allowed member hands that message to
+the agent as a bug report, like a mention. It starts once per message: a
+retried event, a second reaction and a removed-and-re-added reaction are
+ignored, through a content-free claim kept under
+`~/zylos/components/slack/bug-reports/`. Bot posts, thread replies and messages
+that already mentioned the agent are not reported this way.
 
 Thread context holds the parent plus the newest replies. Replies are read in
 pages of 200, up to 5 pages; beyond that the newest replies read are used.
