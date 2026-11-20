@@ -40,6 +40,7 @@ Slack communication channel for [Zylos](https://github.com/zylos-ai).
    - `reactions:read`
    - `reactions:write`
    - `users:read`
+   - `users:read.email` (only for widget bug reports, below)
 4. Install the app to your workspace
 5. Copy the **Bot User OAuth Token** (`xoxb-...`)
 
@@ -123,6 +124,19 @@ already handed over finds it and does nothing. A mention is never refused by
 it. A reported message gets one delivery attempt; if its outcome is unknown the
 log says so and an explicit mention hands it over. Bot and app posts, thread
 replies and messages that mention the agent are not reported this way.
+
+A channel's `widgetBot` (`{ "botId": "B…", "userId": "U…" }`) names an in-product
+feedback widget's bot. Its top-level "New bug report" posts are the one bot
+message that can reach the agent: the From email, read only from its fixed
+position after the heading and severity, is looked up with
+`users.lookupByEmail`, and the post is dispatched like a `:bug:` report (same
+handoff receipt, at most once per message, one delivery attempt) when that user
+is a current full member of this workspace (not a guest, external, app user,
+bot or deactivated) and is in the channel's `allowFrom`. The widget bot stays the
+message's sender ("<name> (widget report)"), and the From email is replaced by
+the reporter's mention in the channel log, the history and the agent's text. "New
+feedback" posts, other reporters, a failed lookup (logged in one line without
+the email) and every other bot message are dropped as before.
 
 Thread context holds the parent plus the newest replies. Replies are read in
 pages of 200, up to 5 pages; beyond that the newest replies read are used.

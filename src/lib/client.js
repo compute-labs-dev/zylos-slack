@@ -3,6 +3,7 @@ import { WebClient } from '@slack/web-api';
 let webClient = null;
 let botUserId = null;
 let botName = null;
+let botTeamId = null;
 
 /**
  * Initialize the Slack Web API client.
@@ -25,12 +26,17 @@ export async function fetchBotIdentity() {
   const res = await client.auth.test();
   botUserId = res.user_id;
   botName = res.user;
+  botTeamId = res.team_id;
   console.log(`[slack] Bot identity: @${botName} (${botUserId})`);
   return { userId: botUserId, name: botName };
 }
 
 export function getBotUserId() {
   return botUserId;
+}
+
+export function getBotTeamId() {
+  return botTeamId;
 }
 
 export function getBotName() {

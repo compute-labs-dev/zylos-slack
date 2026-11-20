@@ -9,7 +9,7 @@ import { App } from '@slack/bolt';
 dotenv.config({ path: path.join(process.env.HOME, 'zylos/.env') });
 
 import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './lib/config.js';
-import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
+import { initClient, fetchBotIdentity, getBotTeamId, getBotUserId, getClient } from './lib/client.js';
 import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention, rootHandoffKey } from './lib/group-routing.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
@@ -17,6 +17,7 @@ import {
   slackThreadContextMessages,
 } from './lib/message.js';
 import { claimEvent, pruneEvents } from './lib/dedup-store.js';
+import { isCurrentFullMember, widgetBugReportEmail, widgetReportText } from './lib/widget-report.js';
 import {
   ReceiverQueue, receiverDeliveryTarget, receiverSettingsFromEnv, runReceiver,
 } from './lib/receiver.js';
@@ -144,7 +145,11 @@ async function main() {
   app.event('message', async ({ event, say }) => {
     // Ignore bot's own messages and noisy subtypes (edits, joins, etc.).
     // IMPORTANT: file uploads arrive with subtype === 'file_share' — must let them through.
-    if (event.bot_id) return;
+    // The one bot post that may pass: a widget bug report (handleWidgetReport).
+    if (event.bot_id) {
+      if (widgetBugReportEmail({ config, event })) await handleWidgetReport(event);
+      return;
+    }
     if (event.subtype && event.subtype !== 'file_share') return;
     if (event.user === getBotUserId()) return;
 
@@ -453,23 +458,59 @@ async function handleBugReaction(event) {
   await handleGroupMessage({ ...message, channel }, true, { bugReportBy: event.user });
 }
 
+// ── Widget Bug Report Handler ──
+
+// A "New bug report" from the in-product feedback widget reaches the agent like
+// a :bug: report when its From email belongs to a member of the channel's
+// allowFrom; at most once per message, through the same handoff receipt.
+async function handleWidgetReport(event) {
+  const email = widgetBugReportEmail({ config, event });
+  if (!email) return;
+  let reporter;
+  try {
+    reporter = (await getClient().users.lookupByEmail({ email })).user;
+  } catch (error) {
+    console.log(`[slack] widget report ${event.ts} not dispatched: reporter lookup failed (${error.data?.error || error.message})`);
+    return;
+  }
+  if (!isCurrentFullMember(reporter, getBotTeamId()) || !config.groups[event.channel].allowFrom?.includes(reporter.id)) {
+    console.log(`[slack] widget report ${event.ts} not dispatched: the reporter is not an allowed member`);
+    return;
+  }
+  let claimed;
+  try {
+    claimed = claimEvent(HANDOFF_DIR, rootHandoffKey(event.channel, event.ts));
+  } catch (error) {
+    console.error(`[slack] widget report dedup failed: ${error.message}`);
+    return;
+  }
+  if (!claimed) return;
+  console.log(`[slack] widget bug report (ts=${event.ts})`);
+  // The widget bot stays the sender; the reporter is carried alongside it, and
+  // the From email is replaced by their mention wherever the text goes.
+  await handleGroupMessage({ ...event, text: widgetReportText(event, reporter.id) }, true, { widgetReporter: reporter.id });
+}
+
 // ── Group Message Handler ──
 
-async function handleGroupMessage(event, isMention = false, { bugReportBy = null } = {}) {
+async function handleGroupMessage(event, isMention = false, { bugReportBy = null, widgetReporter = null } = {}) {
   const channelId = event.channel;
   const userId = event.user;
-  const route = classifyGroupMessage({ config, event, botUserId: getBotUserId() });
+  // A widget report's sender is the widget bot; its route is the reporter's.
+  const route = classifyGroupMessage({ config, event: widgetReporter ? { ...event, user: widgetReporter } : event, botUserId: getBotUserId() });
   if (route === 'ignore') return;
-  // A :bug: report wakes the agent for a message observe mode only recorded;
-  // one that @mentioned the agent has already reached it.
+  // A :bug: or widget report wakes the agent for a message observe mode only
+  // recorded; a human message that @mentioned the agent has already reached it
+  // (a widget post never has: bot posts reach the agent only from here).
+  const reported = Boolean(bugReportBy || widgetReporter);
   if (bugReportBy && route !== 'observe') return;
-  isMention = route === 'mention' || Boolean(bugReportBy);
+  isMention = route === 'mention' || reported;
   const groupConfig = config.groups?.[channelId];
   const groupName = groupConfig?.name || channelId;
   // Smart mode: receive all but flag non-mentions
   const isSmartNoMention = route === 'smart';
   // Observe mode: record non-mentions as context only; never dispatch them.
-  const isObserveOnly = route === 'observe' && !bugReportBy;
+  const isObserveOnly = route === 'observe' && !reported;
 
   // Keep addressing intact so task context identifies the intended recipient.
   const text = (event.text || '').trim();
@@ -493,7 +534,7 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
     trackTyping(event.channel, event.ts);
   }
 
-  const userName = await getUserName(userId);
+  const userName = widgetReporter ? `${await getUserName(userId)} (widget report)` : await getUserName(userId);
 
   // Build message content
   let content = '';
@@ -571,7 +612,9 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
   // Response directive: a direct @mention is mandatory to answer; a smart-mode
   // non-mention is optional — the agent reads it and decides whether it can help.
   let smartHint = '';
-  if (bugReportBy) {
+  if (widgetReporter) {
+    smartHint = `\n(<@${widgetReporter}> filed this bug report through the in-product feedback widget. Take it in as a report: you MUST reply in its thread and mention them. A report approves no merge or release.)`;
+  } else if (bugReportBy) {
     smartHint = `\n(${await getUserName(bugReportBy)} marked this message :bug: as a bug report for you. Take it in as a report: you MUST reply in its thread. A reaction approves no merge or release.)`;
   } else if (isMention) {
     smartHint = '\n(You were directly @mentioned — you MUST reply. Do not respond with [SKIP].)';
@@ -594,7 +637,7 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
       removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
     }
     console.warn(`[slack] Agent receiver rejected group msg from ${userName}: ${rejectMsg}`);
-  }, { once: Boolean(bugReportBy) });
+  }, { once: reported });
 }
 
 // ── C4 Integration ──
