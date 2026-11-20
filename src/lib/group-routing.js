@@ -27,3 +27,29 @@ export function classifyGroupMessage({ config, event, botUserId }) {
   // observe: record the message as context for a later mention, never dispatch it.
   return mode === 'smart' || mode === 'observe' ? mode : 'ignore';
 }
+
+// A :bug: from an internal member on a human top-level message in an observe
+// channel hands that message to the agent as a bug report.
+export const BUG_REACTION = 'bug';
+
+export function isBugReaction({ config, event }) {
+  const group = config.groups?.[event?.item?.channel];
+  return event?.reaction === BUG_REACTION && event.item.type === 'message'
+    && group?.mode === 'observe' && Array.isArray(group.allowFrom) && group.allowFrom.includes(event.user);
+}
+
+/** The durable receipt of a top-level message an observe channel handed to the
+ * agent: written by a mention, required absent by a :bug: report. */
+export const rootHandoffKey = (channel, ts) => `handoff:${channel}:${ts}`;
+
+/** The receipt key of a reported message, or null when it is not a human
+ * top-level message (no bot_id or app_id) from an allowed member of that
+ * channel that does not mention this bot (a mention reaches the agent itself). */
+export function bugReportKey({ config, event, message, botUserId }) {
+  const { channel, ts } = event.item;
+  const allowFrom = config.groups?.[channel]?.allowFrom || [];
+  if (!message || message.ts !== ts || (message.thread_ts && message.thread_ts !== ts)
+      || message.bot_id || message.app_id || (message.subtype && message.subtype !== 'file_share')
+      || !allowFrom.includes(message.user) || isExplicitMention(message.text, botUserId)) return null;
+  return rootHandoffKey(channel, ts);
+}
