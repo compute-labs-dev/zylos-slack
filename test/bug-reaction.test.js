@@ -53,7 +53,7 @@ function harness({ message = report, dir = fs.mkdtempSync(path.join(os.tmpdir(),
     sendToAgent: (...args) => deliveries.push(args),
     // The real C4 path, with the subprocess replaced: C4 accepts the send but its answer is lost.
     receiverSettings: null, C4_RECEIVE: '/c4-receive.js', typingTrackers: new Map(),
-    exec: (cmd, options, callback) => { execs.push(cmd); callback(Object.assign(new Error('Command failed: timed out'), { stdout: '' }), ''); },
+    exec: (cmd, options, callback) => { execs.push(cmd); callback(Object.assign(new Error(`Command failed: ${cmd}`), { code: 1, stdout: cmd }), cmd); },
     setTimeout: fn => { timers.push(fn); },
   });
   vm.runInContext(handlers, context);
@@ -130,7 +130,10 @@ test('a claimed report gets exactly one C4 attempt when its answer is lost; an o
   await reported.react(WARREN);
   reported.runTimers();
   assert.equal(reported.execs.length, 1);
-  assert.ok(reported.logs.some(line => /may not have reached the agent/.test(line)));
+  assert.ok(reported.execs[0].includes('Onboarding will not let people delete'), 'the command carries the report text');
+  assert.deepEqual(reported.logs.filter(line => /may not have reached the agent/.test(line)),
+    ['[slack] A claimed report may not have reached the agent (exit 1); it is not sent again. An explicit mention hands it over.']);
+  assert.ok(!reported.logs.some(line => /Onboarding|c4-receive|--content/.test(line)), 'neither the command nor the report text is logged');
   const mentioned = harness({ realC4: true });
   await mentioned.mention(`<@${SWE}> please look`);
   mentioned.runTimers();

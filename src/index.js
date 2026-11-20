@@ -720,7 +720,9 @@ function sendToC4(source, endpoint, content, onReject, { once = false } = {}) {
       return;
     }
     if (once) {
-      console.warn(`[slack] A claimed report may not have reached the agent (${error.message}); it is not sent again. An explicit mention hands it over.`);
+      // A fixed line: exec's error message carries the whole command, report text included.
+      const exit = Number.isInteger(error.code) ? error.code : /^SIG[A-Z0-9]+$/.test(String(error.signal)) ? error.signal : 'unknown';
+      console.warn(`[slack] A claimed report may not have reached the agent (exit ${exit}); it is not sent again. An explicit mention hands it over.`);
       return;
     }
 
