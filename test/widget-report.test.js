@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention } from '../src/lib/group-routing.js';
+import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention, rootHandoffKey } from '../src/lib/group-routing.js';
 import { claimEvent } from '../src/lib/dedup-store.js';
 import { widgetBugReportEmail, widgetReportText } from '../src/lib/widget-report.js';
 
@@ -56,8 +56,8 @@ const handlers = between('async function handleBugReaction(', '// ── C4 Inte
 function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')) } = {}) {
   const deliveries = []; const lookups = []; const logs = [];
   const context = vm.createContext({
-    config, classifyGroupMessage, isExplicitMention, isBugReaction, bugReportKey, claimEvent, widgetBugReportEmail, widgetReportText,
-    BUG_REPORT_DIR: dir, dedupMap: new Map(), chatHistories: new Map(), getBotUserId: () => SWE,
+    config, classifyGroupMessage, isExplicitMention, isBugReaction, bugReportKey, rootHandoffKey, claimEvent, widgetBugReportEmail, widgetReportText,
+    HANDOFF_DIR: dir, dedupMap: new Map(), chatHistories: new Map(), getBotUserId: () => SWE,
     console: { log: line => logs.push(line), warn() {}, error: line => logs.push(line) },
     getClient: () => ({ users: { lookupByEmail: async ({ email }) => {
       lookups.push(email);
@@ -86,6 +86,7 @@ test('an internal reporter\'s widget bug report reaches the agent once, in both 
     assert.equal(h.deliveries.length, 1, shape);
     const [, endpoint, content] = h.deliveries[0];
     assert.equal(endpoint, `${FEEDBACK}|group|${TS}`);
+    assert.deepEqual({ ...h.deliveries[0][5] }, { once: true }, `${shape}: one delivery attempt, like a :bug: report`);
     assert.match(content, /Nick said: <current-message>/);
     assert.match(content, /Cannot delete the default numbers\./, `${shape}: the description reaches the agent`);
     assert.match(content, new RegExp(`<@${NICK}> filed this bug report through the in-product feedback widget\\. Take it in as a report: you MUST reply in its thread and mention them\\. A report approves no merge or release\\.`));
@@ -97,6 +98,14 @@ test('a widget report whose text names the agent is still dispatched once', asyn
   const h = harness();
   await h.post(shapeA({ description: `<@${SWE}> onboarding is broken` }));
   assert.equal(h.deliveries.length, 1);
+});
+
+test('a widget root a mention already handed over is not handed over again', async () => {
+  const h = harness();
+  fs.writeFileSync(path.join(h.dir, 'seed'), '');
+  claimEvent(h.dir, rootHandoffKey(FEEDBACK, TS));
+  await h.post(shapeA());
+  assert.equal(h.deliveries.length, 0);
 });
 
 test('a retry, a restart and a later :bug: start nothing more', async () => {

@@ -2,16 +2,24 @@
 
 ## Unreleased
 
+## 0.1.7 (2026-11-20)
+
 - Add widget bug reports: with a channel's `widgetBot` configured, a top-level
   "New bug report" from that bot whose From email resolves (`users.lookupByEmail`,
-  needs `users:read.email`) to a member of the channel's `allowFrom` is dispatched
-  once like a `:bug:` report, screenshot included. Every other bot post is still
-  dropped.
+  needs `users:read.email`) to a member of the channel's `allowFrom` is handed to
+  the agent at most once like a `:bug:` report (same receipt, one C4 attempt),
+  screenshot included. Every other bot post is still dropped.
+
+## 0.1.6 (2026-11-20)
 
 - Add `:bug:` reports in `observe` channels: an allowed member's `:bug:`
   reaction on a human top-level message from an allowed member dispatches that
-  message to the agent once (durable claim per message). Needs the
-  `reaction_added` bot event and the `reactions:read` scope.
+  message to the agent at most once. A durable receipt per top-level message
+  (`components/slack/root-handoffs/`) is written by a mention and by a `:bug:`
+  report; a `:bug:` is refused when it exists, a mention never is. A claimed
+  report gets exactly one C4 attempt (one log line if its outcome is unknown);
+  ordinary messages keep their retry. Needs the `reaction_added` bot event and
+  the `reactions:read` scope.
 
 ## 0.1.5 (2026-10-17)
 
