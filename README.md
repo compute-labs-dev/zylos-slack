@@ -130,7 +130,11 @@ feedback widget's bot. Its top-level "New bug report" posts are the one bot
 message that can reach the agent: the From email, read only from its fixed
 position after the heading and severity, is looked up with
 `users.lookupByEmail`, and the post is dispatched like a `:bug:` report (same
-handoff receipt, at most once per message, one delivery attempt) when that user is in the channel's `allowFrom`. "New
+handoff receipt, at most once per message, one delivery attempt) when that user
+is a current full member of this workspace (not a guest, external, app user,
+bot or deactivated) and is in the channel's `allowFrom`. The widget bot stays the
+message's sender ("<name> (widget report)"), and the From email is replaced by
+the reporter's mention in the channel log, the history and the agent's text. "New
 feedback" posts, other reporters, a failed lookup (logged in one line without
 the email) and every other bot message are dropped as before.
 

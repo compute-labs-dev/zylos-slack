@@ -2,13 +2,19 @@
 
 ## Unreleased
 
-## 0.1.6 (2026-11-20)
+## 0.1.7 (2026-11-20)
 
 - Add widget bug reports: with a channel's `widgetBot` configured, a top-level
   "New bug report" from that bot whose From email resolves (`users.lookupByEmail`,
-  needs `users:read.email`) to a member of the channel's `allowFrom` is handed to
-  the agent at most once like a `:bug:` report (same receipt, one C4 attempt),
-  screenshot included. Every other bot post is still dropped.
+  needs `users:read.email`) to a current full member of this workspace who is in
+  the channel's `allowFrom` is handed to the agent at most once like a `:bug:`
+  report (same receipt, one C4 attempt), screenshot included. The widget bot
+  stays the sender ("<name> (widget report)"); the From email is replaced by the
+  reporter's mention in the log, history and agent text. Every other bot post is
+  still dropped.
+
+## 0.1.6 (2026-11-20)
+
 - Add `:bug:` reports in `observe` channels: an allowed member's `:bug:`
   reaction on a human top-level message from an allowed member dispatches that
   message to the agent at most once. A durable receipt per top-level message

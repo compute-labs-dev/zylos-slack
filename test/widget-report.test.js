@@ -6,7 +6,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention, rootHandoffKey } from '../src/lib/group-routing.js';
 import { claimEvent } from '../src/lib/dedup-store.js';
-import { widgetBugReportEmail, widgetReportText } from '../src/lib/widget-report.js';
+import { isCurrentFullMember, widgetBugReportEmail, widgetReportText } from '../src/lib/widget-report.js';
 
 const SWE = 'U0B7K6V2LTG';
 const NICK = 'U0744HVT3JS';
@@ -19,9 +19,9 @@ const config = {
   groups: { [FEEDBACK]: { mode: 'observe', allowFrom: [NICK, WARREN], name: 'financing-platform-feedback', widgetBot: WIDGET } },
 };
 const directory = {
-  'nick@computelabs.ai': { user: { id: NICK, deleted: false, is_bot: false } },
-  'gone@computelabs.ai': { user: { id: WARREN, deleted: true, is_bot: false } },
-  'outsider@example.com': { user: { id: 'U0GUEST01', deleted: false, is_bot: false } },
+  'nick@computelabs.ai': { user: { id: NICK, team_id: 'T0TEAM', deleted: false, is_bot: false } },
+  'gone@computelabs.ai': { user: { id: WARREN, team_id: 'T0TEAM', deleted: true, is_bot: false } },
+  'outsider@example.com': { user: { id: 'U0GUEST01', team_id: 'T0TEAM', deleted: false, is_bot: false } },
   'stranger@disposable.test': { error: 'users_not_found' },
   'noscope@computelabs.ai': { error: 'missing_scope' },
 };
@@ -55,10 +55,11 @@ const handlers = between('async function handleBugReaction(', '// ── C4 Inte
 const c4 = between('function endpointTarget(', '// ── Typing Indicator');
 
 function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')), realC4 = false } = {}) {
-  const deliveries = []; const lookups = []; const logs = []; const execs = []; const timers = [];
+  const deliveries = []; const lookups = []; const logs = []; const execs = []; const timers = []; const channelLog = []; const histories = new Map();
   const context = vm.createContext({
     config, classifyGroupMessage, isExplicitMention, isBugReaction, bugReportKey, rootHandoffKey, claimEvent, widgetBugReportEmail, widgetReportText,
-    HANDOFF_DIR: dir, dedupMap: new Map(), chatHistories: new Map(), getBotUserId: () => SWE,
+    isCurrentFullMember, getBotTeamId: () => 'T0TEAM',
+    HANDOFF_DIR: dir, dedupMap: new Map(), chatHistories: histories, getBotUserId: () => SWE,
     console: { log: line => logs.push(line), warn: line => logs.push(line), error: line => logs.push(line) },
     getClient: () => ({ users: { lookupByEmail: async ({ email }) => {
       lookups.push(email);
@@ -68,10 +69,10 @@ function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')
     } } }),
     handleDM: async () => { throw new Error('not a DM'); },
     addReaction: async () => {}, removeReaction: async () => {}, trackTyping: () => {},
-    getUserName: async id => ({ [NICK]: 'Nick' })[id] || id,
+    getUserName: async id => ({ [NICK]: 'Nick', [WIDGET.userId]: 'Financing Platform Feedback' })[id] || id,
     downloadFile: async () => '/fake/screenshot.png',
     fetchThread: async () => [], slackThreadContextMessages: replies => replies, slackMessageText: m => m.text,
-    logMessage: () => {}, buildEndpoint: (...parts) => parts.filter(Boolean).join('|'),
+    logMessage: (channel, entry) => channelLog.push(entry), buildEndpoint: (...parts) => parts.filter(Boolean).join('|'),
     sendToAgent: (...args) => deliveries.push(args),
     // The real C4 path, with the subprocess replaced: C4 accepts the send but its answer is lost.
     receiverSettings: null, C4_RECEIVE: '/c4-receive.js', typingTrackers: new Map(),
@@ -81,7 +82,7 @@ function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')
   vm.runInContext(handlers, context);
   if (realC4) vm.runInContext(c4, context);
   const message = vm.runInContext(`(${onMessage})`, context);
-  return { deliveries, lookups, logs, execs, dir, runTimers: () => { while (timers.length) timers.shift()(); },
+  return { deliveries, lookups, logs, execs, dir, channelLog, histories, runTimers: () => { while (timers.length) timers.shift()(); },
     post: event => message({ event, say: async () => {} }),
     react: (item, user = WARREN) => context.handleBugReaction({ reaction: 'bug', user, item }) };
 }
@@ -94,7 +95,11 @@ test('an internal reporter\'s widget bug report reaches the agent once, in both 
     const [, endpoint, content] = h.deliveries[0];
     assert.equal(endpoint, `${FEEDBACK}|group|${TS}`);
     assert.deepEqual({ ...h.deliveries[0][5] }, { once: true }, `${shape}: one delivery attempt, like a :bug: report`);
-    assert.match(content, /Nick said: <current-message>/);
+    assert.match(content, /Financing Platform Feedback \(widget report\) said: <current-message>/, `${shape}: the widget bot is the sender`);
+    assert.deepEqual(h.channelLog.map(entry => [entry.from, entry.userId]), [['Financing Platform Feedback (widget report)', WIDGET.userId]], `${shape}: the channel log records the bot`);
+    assert.match(content, new RegExp(`\\*From:\\*(?: |\\n)<@${NICK}>`), `${shape}: From is the reporter's mention`);
+    const written = [...h.logs, ...h.channelLog.map(entry => JSON.stringify(entry)), ...[...h.histories.values()].flat().map(entry => JSON.stringify(entry)), content].join('\n');
+    assert.ok(!written.includes('nick@computelabs.ai'), `${shape}: the reporter's email is in no log line, history entry or agent text`);
     assert.match(content, /Cannot delete the default numbers\./, `${shape}: the description reaches the agent`);
     assert.match(content, new RegExp(`<@${NICK}> filed this bug report through the in-product feedback widget\\. Take it in as a report: you MUST reply in its thread and mention them\\. A report approves no merge or release\\.`));
     if (shape === 'screenshot') assert.match(content, /<attachments>[\s\S]*\/fake\/screenshot\.png/, 'the screenshot reaches the agent like a human file');
@@ -122,6 +127,21 @@ test('a widget report gets exactly one C4 attempt when its answer is lost', asyn
   assert.equal(h.execs.length, 1);
   assert.ok(h.logs.some(line => /may not have reached the agent \(exit 1\)/.test(line)));
   assert.ok(!h.logs.some(line => /Cannot delete the default numbers|nick@computelabs\.ai|c4-receive/.test(line)), 'neither the report nor the command is logged');
+});
+
+test('a reporter in allowFrom who is no longer a current full member is not dispatched', async () => {
+  for (const [kind, change] of [['guest', { is_restricted: true }], ['single-channel guest', { is_ultra_restricted: true }],
+    ['external', { is_stranger: true }], ['app user', { is_app_user: true }], ['bot', { is_bot: true }], ['deactivated', { deleted: true }],
+    ['another workspace', { team_id: 'T0OTHER' }]]) {
+    const saved = directory['nick@computelabs.ai'];
+    directory['nick@computelabs.ai'] = { user: { ...saved.user, ...change } };
+    try {
+      const h = harness();
+      await h.post(shapeA());
+      assert.equal(h.deliveries.length, 0, kind);
+      assert.ok(h.logs.some(line => /not dispatched: the reporter is not an allowed member/.test(line)), kind);
+    } finally { directory['nick@computelabs.ai'] = saved; }
+  }
 });
 
 test('a retry, a restart and a later :bug: start nothing more', async () => {

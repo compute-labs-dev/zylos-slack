@@ -9,7 +9,7 @@ import { App } from '@slack/bolt';
 dotenv.config({ path: path.join(process.env.HOME, 'zylos/.env') });
 
 import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './lib/config.js';
-import { initClient, fetchBotIdentity, getBotUserId, getClient } from './lib/client.js';
+import { initClient, fetchBotIdentity, getBotTeamId, getBotUserId, getClient } from './lib/client.js';
 import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention, rootHandoffKey } from './lib/group-routing.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
@@ -17,7 +17,7 @@ import {
   slackThreadContextMessages,
 } from './lib/message.js';
 import { claimEvent, pruneEvents } from './lib/dedup-store.js';
-import { widgetBugReportEmail, widgetReportText } from './lib/widget-report.js';
+import { isCurrentFullMember, widgetBugReportEmail, widgetReportText } from './lib/widget-report.js';
 import {
   ReceiverQueue, receiverDeliveryTarget, receiverSettingsFromEnv, runReceiver,
 } from './lib/receiver.js';
@@ -473,7 +473,7 @@ async function handleWidgetReport(event) {
     console.log(`[slack] widget report ${event.ts} not dispatched: reporter lookup failed (${error.data?.error || error.message})`);
     return;
   }
-  if (!reporter?.id || reporter.deleted || reporter.is_bot || !config.groups[event.channel].allowFrom?.includes(reporter.id)) {
+  if (!isCurrentFullMember(reporter, getBotTeamId()) || !config.groups[event.channel].allowFrom?.includes(reporter.id)) {
     console.log(`[slack] widget report ${event.ts} not dispatched: the reporter is not an allowed member`);
     return;
   }
@@ -486,7 +486,9 @@ async function handleWidgetReport(event) {
   }
   if (!claimed) return;
   console.log(`[slack] widget bug report (ts=${event.ts})`);
-  await handleGroupMessage({ ...event, user: reporter.id, text: widgetReportText(event) }, true, { widgetReporter: reporter.id });
+  // The widget bot stays the sender; the reporter is carried alongside it, and
+  // the From email is replaced by their mention wherever the text goes.
+  await handleGroupMessage({ ...event, text: widgetReportText(event, reporter.id) }, true, { widgetReporter: reporter.id });
 }
 
 // ── Group Message Handler ──
@@ -494,7 +496,8 @@ async function handleWidgetReport(event) {
 async function handleGroupMessage(event, isMention = false, { bugReportBy = null, widgetReporter = null } = {}) {
   const channelId = event.channel;
   const userId = event.user;
-  const route = classifyGroupMessage({ config, event, botUserId: getBotUserId() });
+  // A widget report's sender is the widget bot; its route is the reporter's.
+  const route = classifyGroupMessage({ config, event: widgetReporter ? { ...event, user: widgetReporter } : event, botUserId: getBotUserId() });
   if (route === 'ignore') return;
   // A :bug: or widget report wakes the agent for a message observe mode only
   // recorded; a human message that @mentioned the agent has already reached it
@@ -531,7 +534,7 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
     trackTyping(event.channel, event.ts);
   }
 
-  const userName = await getUserName(userId);
+  const userName = widgetReporter ? `${await getUserName(userId)} (widget report)` : await getUserName(userId);
 
   // Build message content
   let content = '';

@@ -34,11 +34,27 @@ export function widgetBugReportEmail({ config, event }) {
   return null;
 }
 
-/** The report as the agent reads it. Without a screenshot the top-level text is
- * only the title, so the blocks' text is used. */
-export function widgetReportText(event) {
+/** The report as the agent, the channel log and the history read it, with the
+ * From email replaced by the resolved reporter's mention. Without a screenshot
+ * the top-level text is only the title, so the blocks' text is used. Page and
+ * Role stay as posted. */
+export function widgetReportText(event, reporterId) {
+  const from = `<@${reporterId}>`;
   const blocks = Array.isArray(event.blocks) ? event.blocks : [];
-  if (blocks[0]?.type !== 'header') return event.text || '';
-  return blocks.flatMap(block => [block.text?.text, ...(block.fields || []).map(field => field?.text)])
+  if (blocks[0]?.type !== 'header') {
+    const lines = String(event.text || '').split('\n');
+    lines[3] = `*From:* ${from}`;
+    return lines.join('\n');
+  }
+  return blocks.flatMap((block, index) => [block.text?.text, ...(block.fields || [])
+    .map((field, position) => (index === 1 && position === 1 ? `*From:*\n${from}` : field?.text))])
     .filter(value => typeof value === 'string' && value).join('\n');
+}
+
+/** A current full member of this workspace, read from the live lookup.
+ * Twin of zylos-cl-config's internalMemberIds (scripts/ops/refresh-slack-allow-from.mjs),
+ * which builds allowFrom and decides admission: keep the two the same. */
+export function isCurrentFullMember(user, teamId) {
+  return Boolean(user?.id) && Boolean(teamId) && user.team_id === teamId && !user.deleted && !user.is_bot && !user.is_app_user
+    && user.id !== 'USLACKBOT' && !user.is_restricted && !user.is_ultra_restricted && !user.is_stranger;
 }
