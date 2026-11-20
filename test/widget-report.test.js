@@ -52,13 +52,14 @@ const between = (from, to) => {
 };
 const onMessage = `${between("app.event('message', ", '\n  });\n\n  // ── Event: App Mention').slice("app.event('message', ".length)}\n  }`;
 const handlers = between('async function handleBugReaction(', '// ── C4 Integration');
+const c4 = between('function endpointTarget(', '// ── Typing Indicator');
 
-function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')) } = {}) {
-  const deliveries = []; const lookups = []; const logs = [];
+function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')), realC4 = false } = {}) {
+  const deliveries = []; const lookups = []; const logs = []; const execs = []; const timers = [];
   const context = vm.createContext({
     config, classifyGroupMessage, isExplicitMention, isBugReaction, bugReportKey, rootHandoffKey, claimEvent, widgetBugReportEmail, widgetReportText,
     HANDOFF_DIR: dir, dedupMap: new Map(), chatHistories: new Map(), getBotUserId: () => SWE,
-    console: { log: line => logs.push(line), warn() {}, error: line => logs.push(line) },
+    console: { log: line => logs.push(line), warn: line => logs.push(line), error: line => logs.push(line) },
     getClient: () => ({ users: { lookupByEmail: async ({ email }) => {
       lookups.push(email);
       const entry = directory[email];
@@ -72,10 +73,16 @@ function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')
     fetchThread: async () => [], slackThreadContextMessages: replies => replies, slackMessageText: m => m.text,
     logMessage: () => {}, buildEndpoint: (...parts) => parts.filter(Boolean).join('|'),
     sendToAgent: (...args) => deliveries.push(args),
+    // The real C4 path, with the subprocess replaced: C4 accepts the send but its answer is lost.
+    receiverSettings: null, C4_RECEIVE: '/c4-receive.js', typingTrackers: new Map(),
+    exec: (cmd, options, callback) => { execs.push(cmd); callback(Object.assign(new Error('Command failed: timed out'), { stdout: '' }), ''); },
+    setTimeout: fn => { timers.push(fn); },
   });
   vm.runInContext(handlers, context);
+  if (realC4) vm.runInContext(c4, context);
   const message = vm.runInContext(`(${onMessage})`, context);
-  return { deliveries, lookups, logs, dir, post: event => message({ event, say: async () => {} }),
+  return { deliveries, lookups, logs, execs, dir, runTimers: () => { while (timers.length) timers.shift()(); },
+    post: event => message({ event, say: async () => {} }),
     react: (item, user = WARREN) => context.handleBugReaction({ reaction: 'bug', user, item }) };
 }
 
@@ -106,6 +113,14 @@ test('a widget root a mention already handed over is not handed over again', asy
   claimEvent(h.dir, rootHandoffKey(FEEDBACK, TS));
   await h.post(shapeA());
   assert.equal(h.deliveries.length, 0);
+});
+
+test('a widget report gets exactly one C4 attempt when its answer is lost', async () => {
+  const h = harness({ realC4: true });
+  await h.post(shapeB());
+  h.runTimers();
+  assert.equal(h.execs.length, 1);
+  assert.ok(h.logs.some(line => /may not have reached the agent/.test(line)));
 });
 
 test('a retry, a restart and a later :bug: start nothing more', async () => {
