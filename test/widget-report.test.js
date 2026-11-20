@@ -93,6 +93,12 @@ test('an internal reporter\'s widget bug report reaches the agent once, in both 
   }
 });
 
+test('a widget report whose text names the agent is still dispatched once', async () => {
+  const h = harness();
+  await h.post(shapeA({ description: `<@${SWE}> onboarding is broken` }));
+  assert.equal(h.deliveries.length, 1);
+});
+
 test('a retry, a restart and a later :bug: start nothing more', async () => {
   const h = harness();
   await h.post(shapeA());

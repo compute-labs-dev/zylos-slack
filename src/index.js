@@ -496,9 +496,10 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
   const route = classifyGroupMessage({ config, event, botUserId: getBotUserId() });
   if (route === 'ignore') return;
   // A :bug: or widget report wakes the agent for a message observe mode only
-  // recorded; one that @mentioned the agent has already reached it.
+  // recorded; a human message that @mentioned the agent has already reached it
+  // (a widget post never has: bot posts reach the agent only from here).
   const reported = Boolean(bugReportBy || widgetReporter);
-  if (reported && route !== 'observe') return;
+  if (bugReportBy && route !== 'observe') return;
   isMention = route === 'mention' || reported;
   const groupConfig = config.groups?.[channelId];
   const groupName = groupConfig?.name || channelId;
