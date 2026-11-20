@@ -75,7 +75,7 @@ function harness({ dir = fs.mkdtempSync(path.join(os.tmpdir(), 'widget-report-')
     sendToAgent: (...args) => deliveries.push(args),
     // The real C4 path, with the subprocess replaced: C4 accepts the send but its answer is lost.
     receiverSettings: null, C4_RECEIVE: '/c4-receive.js', typingTrackers: new Map(),
-    exec: (cmd, options, callback) => { execs.push(cmd); callback(Object.assign(new Error('Command failed: timed out'), { stdout: '' }), ''); },
+    exec: (cmd, options, callback) => { execs.push(cmd); callback(Object.assign(new Error(`Command failed: ${cmd}`), { code: 1, stdout: cmd }), cmd); },
     setTimeout: fn => { timers.push(fn); },
   });
   vm.runInContext(handlers, context);
@@ -120,7 +120,8 @@ test('a widget report gets exactly one C4 attempt when its answer is lost', asyn
   await h.post(shapeB());
   h.runTimers();
   assert.equal(h.execs.length, 1);
-  assert.ok(h.logs.some(line => /may not have reached the agent/.test(line)));
+  assert.ok(h.logs.some(line => /may not have reached the agent \(exit 1\)/.test(line)));
+  assert.ok(!h.logs.some(line => /Cannot delete the default numbers|nick@computelabs\.ai|c4-receive/.test(line)), 'neither the report nor the command is logged');
 });
 
 test('a retry, a restart and a later :bug: start nothing more', async () => {
