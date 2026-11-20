@@ -115,11 +115,14 @@ Slack. `allowFrom` and `peerBotUserIds` apply as in the other modes.
 
 In an `observe` channel, a `:bug:` reaction from a member of its `allowFrom`
 on a human top-level message from another allowed member hands that message to
-the agent as a bug report, like a mention. It starts once per message: a
-retried event, a second reaction and a removed-and-re-added reaction are
-ignored, through a content-free claim kept under
-`~/zylos/components/slack/bug-reports/`. Bot posts, thread replies and messages
-that already mentioned the agent are not reported this way.
+the agent as a bug report, like a mention. It starts at most once per message:
+a mention or the first `:bug:` writes a content-free receipt under
+`~/zylos/components/slack/root-handoffs/`, and a retried event, a second
+reaction, a removed-and-re-added reaction or a `:bug:` on a root a mention
+already handed over finds it and does nothing. A mention is never refused by
+it. A reported message gets one delivery attempt; if its outcome is unknown the
+log says so and an explicit mention hands it over. Bot and app posts, thread
+replies and messages that mention the agent are not reported this way.
 
 Thread context holds the parent plus the newest replies. Replies are read in
 pages of 200, up to 5 pages; beyond that the newest replies read are used.

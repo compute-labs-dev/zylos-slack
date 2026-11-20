@@ -2,10 +2,16 @@
 
 ## Unreleased
 
+## 0.1.6 (2026-11-20)
+
 - Add `:bug:` reports in `observe` channels: an allowed member's `:bug:`
   reaction on a human top-level message from an allowed member dispatches that
-  message to the agent once (durable claim per message). Needs the
-  `reaction_added` bot event and the `reactions:read` scope.
+  message to the agent at most once. A durable receipt per top-level message
+  (`components/slack/root-handoffs/`) is written by a mention and by a `:bug:`
+  report; a `:bug:` is refused when it exists, a mention never is. A claimed
+  report gets exactly one C4 attempt (one log line if its outcome is unknown);
+  ordinary messages keep their retry. Needs the `reaction_added` bot event and
+  the `reactions:read` scope.
 
 ## 0.1.5 (2026-10-17)
 

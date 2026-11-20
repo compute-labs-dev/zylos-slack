@@ -10,7 +10,7 @@ dotenv.config({ path: path.join(process.env.HOME, 'zylos/.env') });
 
 import { getConfig, watchConfig, stopWatching, saveConfig, DATA_DIR } from './lib/config.js';
 import { initClient, fetchBotIdentity, getBotUserId } from './lib/client.js';
-import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention } from './lib/group-routing.js';
+import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention, rootHandoffKey } from './lib/group-routing.js';
 import {
   addReaction, removeReaction, downloadFile, getUserName,
   fetchHistory, fetchThread, sendLongMessage, sendText, slackMessageText,
@@ -42,8 +42,9 @@ const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const TYPING_DIR = path.join(DATA_DIR, 'typing');
 const REVIEW_FINDING_ACTION_DIR = path.join(DATA_DIR, 'review-finding-actions');
 const RECEIVER_DEDUP_DIR = path.join(DATA_DIR, 'receiver-dedup');
-// One content-free file per reported message, kept so a report starts once.
-const BUG_REPORT_DIR = path.join(DATA_DIR, 'bug-reports');
+// One content-free receipt per top-level message an observe channel handed to
+// the agent (mention or :bug:), kept so a :bug: report starts at most once.
+const HANDOFF_DIR = path.join(DATA_DIR, 'root-handoffs');
 const REVIEW_FINDING_WORKFLOW_BIN = resolveReviewFindingWorkflowBin();
 const REVIEW_FINDING_WORKFLOW_COMMAND = process.env.REVIEW_FINDING_WORKFLOW_COMMAND
   || 'computelabs-agent-workflow';
@@ -425,9 +426,9 @@ async function handleDM(event) {
 // ── Bug Reaction Handler ──
 
 // An internal member's :bug: on a human top-level message in an observe channel
-// hands that message to the agent as a report. It starts once per message:
-// a Slack retry, a second person's :bug: and a remove-and-re-add all claim the
-// same durable key.
+// hands that message to the agent as a report. It starts at most once per
+// message: a Slack retry, a second person's :bug:, a remove-and-re-add and a
+// root an earlier mention already handed over all meet the same receipt.
 async function handleBugReaction(event) {
   if (!isBugReaction({ config, event })) return;
   const { channel, ts } = event.item;
@@ -438,11 +439,11 @@ async function handleBugReaction(event) {
     console.warn(`[slack] :bug: message ${ts} could not be read: ${error.message}`);
     return;
   }
-  const key = bugReportKey({ config, event, message });
+  const key = bugReportKey({ config, event, message, botUserId: getBotUserId() });
   if (!key) return;
   let claimed;
   try {
-    claimed = claimEvent(BUG_REPORT_DIR, key);
+    claimed = claimEvent(HANDOFF_DIR, key);
   } catch (error) {
     console.error(`[slack] :bug: dedup failed: ${error.message}`);
     return;
@@ -473,6 +474,17 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
   // Keep addressing intact so task context identifies the intended recipient.
   const text = (event.text || '').trim();
   if (!text && !(event.files?.length > 0)) return;
+
+  // A mention of a top-level message in an observe channel writes its handoff
+  // receipt, so a later :bug: on it does not hand it over again. The receipt
+  // never refuses a mention: an explicit mention always reaches the agent.
+  if (route === 'mention' && groupConfig?.mode === 'observe' && (!event.thread_ts || event.thread_ts === event.ts)) {
+    try {
+      claimEvent(HANDOFF_DIR, rootHandoffKey(channelId, event.ts));
+    } catch (error) {
+      console.error(`[slack] handoff receipt failed: ${error.message}`);
+    }
+  }
 
   // Typing indicator (only for messages that require a response). Do this
   // before user/profile lookup, attachment download, or thread hydration.
@@ -582,7 +594,7 @@ async function handleGroupMessage(event, isMention = false, { bugReportBy = null
       removeReaction(event.channel, event.ts, 'hourglass_flowing_sand');
     }
     console.warn(`[slack] Agent receiver rejected group msg from ${userName}: ${rejectMsg}`);
-  });
+  }, { once: Boolean(bugReportBy) });
 }
 
 // ── C4 Integration ──
@@ -603,9 +615,9 @@ function completeTyping(endpoint) {
   typingTrackers.delete(`${channel}-${messageTs}`);
 }
 
-function sendToAgent(source, endpoint, content, eventKey, onReject) {
+function sendToAgent(source, endpoint, content, eventKey, onReject, { once = false } = {}) {
   if (!receiverSettings) {
-    sendToC4(source, endpoint, content, onReject);
+    sendToC4(source, endpoint, content, onReject, { once });
     return;
   }
 
@@ -654,7 +666,9 @@ function sendToAgent(source, endpoint, content, eventKey, onReject) {
     .finally(() => completeTyping(endpoint));
 }
 
-function sendToC4(source, endpoint, content, onReject) {
+// `once`: a claimed report (its receipt is already written) gets exactly one
+// attempt, since C4 may have accepted a send whose answer was lost.
+function sendToC4(source, endpoint, content, onReject, { once = false } = {}) {
   const safeContent = content.replace(/'/g, "'\\''");
   const cmd = `node "${C4_RECEIVE}" --channel "${source}" --endpoint "${endpoint}" --json --content '${safeContent}'`;
 
@@ -663,6 +677,10 @@ function sendToC4(source, endpoint, content, onReject) {
   exec(cmd, { encoding: 'utf8', timeout }, (error, stdout) => {
     if (!error) {
       console.log(`[slack] Sent to C4: ${content.substring(0, 60)}...`);
+      return;
+    }
+    if (once) {
+      console.warn(`[slack] A claimed report may not have reached the agent (${error.message}); it is not sent again. An explicit mention hands it over.`);
       return;
     }
 

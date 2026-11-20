@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { bugReportKey, classifyGroupMessage, isBugReaction } from '../src/lib/group-routing.js';
+import { bugReportKey, classifyGroupMessage, isBugReaction, isExplicitMention, rootHandoffKey } from '../src/lib/group-routing.js';
 import { claimEvent } from '../src/lib/dedup-store.js';
 
 const SWE = 'U0B7K6V2LTG';
@@ -34,12 +34,16 @@ const slice = (from, to) => {
   return source.slice(start, end);
 };
 const handlers = slice('async function handleBugReaction(', '// ── C4 Integration');
+const c4 = slice('function endpointTarget(', '// ── Typing Indicator');
 
-function harness({ message = report, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bug-report-')) } = {}) {
+function harness({ message = report, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bug-report-')), realC4 = false } = {}) {
   const deliveries = [];
-  const context = {
-    config, classifyGroupMessage, isBugReaction, bugReportKey, claimEvent, BUG_REPORT_DIR: dir,
-    getBotUserId: () => SWE, chatHistories: new Map(), console: { log() {}, warn() {}, error() {} },
+  const execs = [];
+  const logs = [];
+  const timers = [];
+  const context = vm.createContext({
+    config, classifyGroupMessage, isBugReaction, bugReportKey, rootHandoffKey, claimEvent, HANDOFF_DIR: dir,
+    getBotUserId: () => SWE, chatHistories: new Map(), console: { log() {}, warn: line => logs.push(line), error: line => logs.push(line) },
     addReaction: async () => {}, removeReaction: async () => {}, trackTyping: () => {},
     getUserName: async id => ({ [NICK]: 'Nick', [WARREN]: 'Warren' })[id] || id,
     downloadFile: async () => '/fake/attachment',
@@ -47,10 +51,19 @@ function harness({ message = report, dir = fs.mkdtempSync(path.join(os.tmpdir(),
     slackThreadContextMessages: replies => replies, slackMessageText: m => m.text,
     logMessage: () => {}, buildEndpoint: (...parts) => parts.filter(Boolean).join('|'),
     sendToAgent: (...args) => deliveries.push(args),
-  };
-  const handle = vm.runInNewContext(`${handlers}; handleBugReaction`, context);
-  return { deliveries, dir, react: (user, extra = {}) => handle({ type: 'reaction_added', user, reaction: 'bug',
-    item: { type: 'message', channel: FEEDBACK, ts: ROOT_TS }, item_user: NICK, event_ts: String(Math.random()), ...extra }) };
+    // The real C4 path, with the subprocess replaced: C4 accepts the send but its answer is lost.
+    receiverSettings: null, C4_RECEIVE: '/c4-receive.js', typingTrackers: new Map(),
+    exec: (cmd, options, callback) => { execs.push(cmd); callback(Object.assign(new Error('Command failed: timed out'), { stdout: '' }), ''); },
+    setTimeout: fn => { timers.push(fn); },
+  });
+  vm.runInContext(handlers, context);
+  if (realC4) { vm.runInContext(c4, context); deliveries.length = 0; }
+  const runTimers = () => { while (timers.length) timers.shift()(); };
+  return { deliveries, execs, logs, dir, runTimers,
+    react: (user, extra = {}) => context.handleBugReaction({ type: 'reaction_added', user, reaction: 'bug',
+      item: { type: 'message', channel: FEEDBACK, ts: ROOT_TS }, item_user: NICK, event_ts: String(Math.random()), ...extra }),
+    // What the message and app_mention events call for a message that mentions the bot.
+    mention: text => context.handleGroupMessage({ ...report, channel: FEEDBACK, text }, true) };
 }
 
 test('the reaction_added event is wired to the bug-report handler', () => {
@@ -85,6 +98,7 @@ test('nothing else starts a report', async () => {
     ['a channel that is not in observe mode', h => h.react(NICK, { item: { type: 'message', channel: 'C0B7ETGHA1H', ts: ROOT_TS } })],
     ['a thread reply', h => h.react(NICK), { ...report, thread_ts: '1794570000.000001' }],
     ['a bot post such as the public widget', h => h.react(NICK), { ...report, user: undefined, bot_id: 'B0WIDGET' }],
+    ['an app post without a bot id', h => h.react(NICK), { ...report, app_id: 'A0SOMEAPP' }],
     ['a message by someone outside the allow list', h => h.react(NICK), { ...report, user: OUTSIDER }],
     ['a message that already @mentioned the agent', h => h.react(NICK), { ...report, text: `<@${SWE}> onboarding is broken` }],
     ['a message that cannot be read', h => h.react(NICK), null],
@@ -94,4 +108,31 @@ test('nothing else starts a report', async () => {
     await act(h);
     assert.equal(h.deliveries.length, 0, name);
   }
+});
+
+test('a root a mention already handed over is not handed over again by a :bug:, even after its mention is edited away', async () => {
+  const edited = { ...report, text: 'Onboarding will not let people delete the default numbers (edited)' };
+  const h = harness({ message: edited });
+  await h.mention(`<@${SWE}> ${report.text}`);
+  await h.react(WARREN);
+  assert.equal(h.deliveries.length, 1);
+});
+
+test('an explicit mention still reaches the agent after a :bug: report', async () => {
+  const h = harness();
+  await h.react(WARREN);
+  await h.mention(`<@${SWE}> any update on this?`);
+  assert.equal(h.deliveries.length, 2);
+});
+
+test('a claimed report gets exactly one C4 attempt when its answer is lost; an ordinary mention keeps its retry', async () => {
+  const reported = harness({ realC4: true });
+  await reported.react(WARREN);
+  reported.runTimers();
+  assert.equal(reported.execs.length, 1);
+  assert.ok(reported.logs.some(line => /may not have reached the agent/.test(line)));
+  const mentioned = harness({ realC4: true });
+  await mentioned.mention(`<@${SWE}> please look`);
+  mentioned.runTimers();
+  assert.equal(mentioned.execs.length, 2, 'deployed mention behaviour is unchanged');
 });
